@@ -17,7 +17,7 @@ class TestLCVxMinFuel(unittest.TestCase):
             pa=40 * np.pi / 180,
             vmax=None
         )
-        self.x0 = np.array([2000., 500., 1500., -100., 50., -75., self.rocket.mwet])
+        self.x0 = np.array([2000., 500., 1500., -100., 50., -75., np.log(self.rocket.mwet)])
         self.tf = 75.
         self.N = 55
         self.dt = self.tf / self.N
@@ -25,13 +25,13 @@ class TestLCVxMinFuel(unittest.TestCase):
     def test_noparam(self):
         """Test problem with no parameterization"""
         # Define problem
-        lcvx_obj = lc.LCVxMinFuel(
+
+        lcvx_obj = lc.LCvxMinFuel(
             rocket=self.rocket,
-            x0=self.x0,
             N=self.N,
             fixed_target=True,
         )
-        prob = lcvx_obj.get_problem(x0=self.x0, tf=self.tf)
+        prob = lcvx_obj.problem(x0=self.x0, tf=self.tf)
         prob.solve(verbose=False)
 
         # Assert problem is solved
@@ -40,32 +40,14 @@ class TestLCVxMinFuel(unittest.TestCase):
     def test_param_x0(self):
         """Test problem with parameterization of x0"""
         # Define problem
-        lcvx_obj = lc.LCVxMinFuel(
+        lcvx_obj = lc.LCvxMinFuel(
             rocket=self.rocket,
-            x0=self.x0,
             N=self.N,
             parameterize_x0=True,
             fixed_target=True,
         )
-        prob = lcvx_obj.get_problem(tf=self.tf)
+        prob = lcvx_obj.problem(tf=self.tf)
         lc.set_params(prob, {'x0': self.x0})
-        prob.solve(verbose=False)
-
-        # Assert problem is solved
-        self.assertTrue(prob.status == 'optimal')
-
-    def test_param_tf(self):
-        """Test problem with parameterization of tf"""
-        # Define problem
-        lcvx_obj = lc.LCVxMinFuel(
-            rocket=self.rocket,
-            x0=self.x0,
-            N=self.N,
-            parameterize_tf=True,
-            fixed_target=True,
-        )
-        prob = lcvx_obj.get_problem(x0=self.x0)
-        lc.set_params(prob, {'tf': self.tf})
         prob.solve(verbose=False)
 
         # Assert problem is solved

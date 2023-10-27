@@ -6,6 +6,7 @@ from typing import Tuple, List
 from .discretization import zoh
 from .rocket import Rocket
 
+__all__ = ['LCvxProblem', 'LCvxMinFuel', 'LCvxMaxRange', 'LCvxReach', 'LCvxReachVxy', 'LCvxReachVz']
 
 class LCvxProblem:
     """Base class for guidance optimization problems for powered descent via lossless convexification."""
