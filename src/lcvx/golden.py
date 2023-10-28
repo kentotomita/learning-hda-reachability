@@ -1,7 +1,9 @@
 import numpy as np
 
 
-def golden(f: callable, a: float, b: float, tol: float=1e-6, max_iter: int=100) -> float:
+def golden(
+    f: callable, a: float, b: float, tol: float = 1e-6, max_iter: int = 100
+) -> float:
     """Golden section search
 
     Args:

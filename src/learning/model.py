@@ -30,24 +30,27 @@ class MLP(nn.Module):
 
     """
 
-    def __init__(self, 
-                 input_dim: int, 
-                 output_dim: int, 
-                 hidden_layers: List[int], 
-                 activation_fn: Union[List[Callable], Callable] = nn.ReLU(), 
-                 output_activation: Callable = nn.Identity(),
-                 dropout_rate: float = 0.5,
-                 use_double_precision: bool = False):
-        
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int,
+        hidden_layers: List[int],
+        activation_fn: Union[List[Callable], Callable] = nn.ReLU(),
+        output_activation: Callable = nn.Identity(),
+        dropout_rate: float = 0.5,
+        use_double_precision: bool = False,
+    ):
         super(MLP, self).__init__()
 
         if isinstance(activation_fn, Callable):
             activation_fn = [activation_fn] * len(hidden_layers)
 
-        assert len(activation_fn) == len(hidden_layers), "If activation_fn is a list, it must be the same length as hidden_layers."
-        
+        assert len(activation_fn) == len(
+            hidden_layers
+        ), "If activation_fn is a list, it must be the same length as hidden_layers."
+
         self.layers = nn.ModuleList()
-        
+
         # Create the hidden layers
         prev_layer_dim = input_dim
         for layer_dim, act_fn in zip(hidden_layers, activation_fn):
@@ -55,7 +58,7 @@ class MLP(nn.Module):
             self.layers.append(act_fn)
             self.layers.append(nn.Dropout(dropout_rate))
             prev_layer_dim = layer_dim
-        
+
         # Create the output layer
         self.layers.append(nn.Linear(prev_layer_dim, output_dim))
         self.layers.append(output_activation)
@@ -66,10 +69,10 @@ class MLP(nn.Module):
     def forward(self, x):
         """
         Forward propagation of the MLP.
-        
+
         Args:
             x (torch.Tensor): The input to the neural network.
-        
+
         Returns:
             torch.Tensor: The output of the neural network.
         """
@@ -79,7 +82,6 @@ class MLP(nn.Module):
 
 
 class NeuralReach(MLP):
-    
     def __init__(self):
         input_dim = 5  # alt, vx, vz, z, tgo
         output_dim = 7  # feasible, xmin, xmax, alpha, yp, a1, a2
@@ -88,8 +90,15 @@ class NeuralReach(MLP):
         output_activation = nn.Sigmoid()
         dropout_rate = 0.5
         use_double_precision = True
-        super(NeuralReach, self).__init__(input_dim, output_dim, hidden_layers, activation_fn, output_activation, dropout_rate, use_double_precision)
-
+        super(NeuralReach, self).__init__(
+            input_dim,
+            output_dim,
+            hidden_layers,
+            activation_fn,
+            output_activation,
+            dropout_rate,
+            use_double_precision,
+        )
 
 
 """

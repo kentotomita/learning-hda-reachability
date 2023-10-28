@@ -72,22 +72,27 @@ def get_nn_reachset_param(x0: Tensor, tgo: Tensor, model: nn.Module, full=False)
     nn_output = model(nn_input)
     nn_output = nn_output.squeeze(0)
     feasible, xmin_, xmax_, alpha_, yp_, a1_, a2_ = nn_output
-    xmin, xmax, alpha, yp, a1, a2 = inverse_transform_reachsetparam(xmin_, xmax_, alpha_, yp_, a1_, a2_, alt)
+    xmin, xmax, alpha, yp, a1, a2 = inverse_transform_reachsetparam(
+        xmin_, xmax_, alpha_, yp_, a1_, a2_, alt
+    )
 
     if full:
         xc1 = xmin + a1
         xc2 = xmax - a2
         xp = alpha * (xmax - xmin) + xmin
-        b1 = torch.sqrt(torch.clamp(yp**2 * (1 - (xp - xc1)**2/(a1**2 + eps)), min=eps))
-        b2 = torch.sqrt(torch.clamp(yp**2 * (1 - (xp - xc2)**2/(a2**2 + eps)), min=eps))
+        b1 = torch.sqrt(
+            torch.clamp(yp**2 * (1 - (xp - xc1) ** 2 / (a1**2 + eps)), min=eps)
+        )
+        b2 = torch.sqrt(
+            torch.clamp(yp**2 * (1 - (xp - xc2) ** 2 / (a2**2 + eps)), min=eps)
+        )
         return xp, xc1, xc2, a1, a2, b1, b2, v_horiz_angle, r[:2]
 
     else:
         return feasible, xmin, xmax, alpha, yp, a1, a2, v_horiz_angle, r[:2]
 
 
-
-def get_nn_reachset(x0: Tensor, tgo: Tensor, model: nn.Module, n:int=100):
+def get_nn_reachset(x0: Tensor, tgo: Tensor, model: nn.Module, n: int = 100):
     """Compute discrete points of soft landing reachable set border using NN model.
 
     Args:
@@ -95,16 +100,26 @@ def get_nn_reachset(x0: Tensor, tgo: Tensor, model: nn.Module, n:int=100):
         tgo (Tensor): time to go
         model (nn.Module): NN model
         n (int, optional): number of points to compute. Defaults to 100.
-    
+
     Returns:
-        Tensor: reachset points, shape (n, 2)   
+        Tensor: reachset points, shape (n, 2)
     """
 
     # compute reachset parameters
-    feasible, xmin, xmax, alpha, yp, a1, a2, rotation_angle, center = get_nn_reachset_param(x0, tgo, model, full=False)
+    (
+        feasible,
+        xmin,
+        xmax,
+        alpha,
+        yp,
+        a1,
+        a2,
+        rotation_angle,
+        center,
+    ) = get_nn_reachset_param(x0, tgo, model, full=False)
 
     # compute border of reachset
-    reach_pts = torch.zeros((2*n - 2, 2))
+    reach_pts = torch.zeros((2 * n - 2, 2))
     xs = torch.linspace(xmin.item(), xmax.item(), n)
     ys, _ = reach_ellipses_torch(X=xs, param=(xmin, xmax, alpha, yp, a1, a2))
     reach_pts[:n, 0] = xs
@@ -129,11 +144,12 @@ def rot2d_torch(theta: Tensor):
     Returns:
         Tensor: 2D rotation matrix
     """
-    return torch.tensor([[torch.cos(theta), -torch.sin(theta)], [torch.sin(theta), torch.cos(theta)]])
+    return torch.tensor(
+        [[torch.cos(theta), -torch.sin(theta)], [torch.sin(theta), torch.cos(theta)]]
+    )
 
 
-
-def visualize_nn_reachset(reach_mask: Tensor, sfmap: Tensor, nskip: int=20):
+def visualize_nn_reachset(reach_mask: Tensor, sfmap: Tensor, nskip: int = 20):
     reach_mask_ = reach_mask.clone()
     reach_mask_ = reach_mask_.detach().cpu().numpy()
     sfmap_ = sfmap.clone()
@@ -144,13 +160,11 @@ def visualize_nn_reachset(reach_mask: Tensor, sfmap: Tensor, nskip: int=20):
 
     fig, ax = plt.subplots()
 
-    ax.scatter(sf[:, 0], sf[:, 1], c=rm, s=0.5, cmap='jet', alpha=0.5)
-    ax.scatter(sf[:, 0], sf[:, 1], c=sf[:, 2], s=0.5, cmap='gray', alpha=0.3)
+    ax.scatter(sf[:, 0], sf[:, 1], c=rm, s=0.5, cmap="jet", alpha=0.5)
+    ax.scatter(sf[:, 0], sf[:, 1], c=sf[:, 2], s=0.5, cmap="gray", alpha=0.3)
 
-    ax.set_xlabel('x')
-    ax.set_ylabel('y')
-    ax.set_aspect('equal')
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_aspect("equal")
     ax.grid(True)
     plt.show()
-
-

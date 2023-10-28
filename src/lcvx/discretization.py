@@ -9,11 +9,13 @@ from scipy.linalg import expm
 import cvxpy as cp
 
 
-def zoh(A: np.ndarray, B: np.ndarray, dt: float, p: np.ndarray=None) -> Tuple[np.ndarray, np.ndarray]:
+def zoh(
+    A: np.ndarray, B: np.ndarray, dt: float, p: np.ndarray = None
+) -> Tuple[np.ndarray, np.ndarray]:
     """Zero-order hold discretization of a continuous-time system.
 
     dx/dt = Ax + Bu + p
-    
+
     Args:
         A: Continuous-time state matrix.
         B: Continuous-time input matrix.
@@ -34,15 +36,12 @@ def zoh(A: np.ndarray, B: np.ndarray, dt: float, p: np.ndarray=None) -> Tuple[np
         p = p.reshape((n, 1))
 
     # build exponential matrix
-    em = np.block([
-    [A, B, p],
-    [np.zeros((m + 1, n + m + 1))]
-    ])
+    em = np.block([[A, B, p], [np.zeros((m + 1, n + m + 1))]])
     em = expm(em * dt)
 
     # extract discrete-time matrices
     Ad = em[:n, :n]
-    Bd = em[:n, n:n + m]
+    Bd = em[:n, n : n + m]
     pd = em[:n, n + m]
 
     if p is None:
@@ -51,9 +50,10 @@ def zoh(A: np.ndarray, B: np.ndarray, dt: float, p: np.ndarray=None) -> Tuple[np
         return Ad, Bd, pd
 
 
-def zoh_cp(A: np.ndarray, B: np.ndarray, dt: cp.Expression, p: np.ndarray=None) -> Tuple[np.ndarray, np.ndarray]:
-    """Zero-order hold discretization when dt is a cvxpy variable.
-    """
+def zoh_cp(
+    A: np.ndarray, B: np.ndarray, dt: cp.Expression, p: np.ndarray = None
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Zero-order hold discretization when dt is a cvxpy variable."""
 
     n = A.shape[0]  # number of states
     m = B.shape[1]  # number of inputs
@@ -68,7 +68,7 @@ def zoh_cp(A: np.ndarray, B: np.ndarray, dt: cp.Expression, p: np.ndarray=None) 
 
     # Discretize
     Ad = np.eye(7) + A * dt + 0.5 * A @ A * dt**2
-    Bd = (np.eye(7) + 0.5 * A * dt + 1/6 * A @ A * dt**2) @ Bc * dt
+    Bd = (np.eye(7) + 0.5 * A * dt + 1 / 6 * A @ A * dt**2) @ Bc * dt
 
     # Extract p
     pd = Bd[:, -1]
@@ -80,5 +80,3 @@ def zoh_cp(A: np.ndarray, B: np.ndarray, dt: cp.Expression, p: np.ndarray=None) 
         return Ad, Bd
     else:
         return Ad, Bd, pd
-
-

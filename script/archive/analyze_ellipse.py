@@ -2,20 +2,19 @@ import numpy as np
 import sys
 import matplotlib.pyplot as plt
 
-sys.path.append('../')
+sys.path.append("../")
 from config import slr_config
 from fit_ellipse import extract_inner_points, conic
 
 np.set_printoptions(precision=1)
 
-if __name__=="__main__":
-    dataset = np.load('../out/reachset_ellipse.npy')
-    reachset = np.load('../out/reachset.npy')
+if __name__ == "__main__":
+    dataset = np.load("../out/reachset_ellipse.npy")
+    reachset = np.load("../out/reachset.npy")
 
     rocket, _ = slr_config()
 
-
-    nc = int((reachset.shape[1] - 8)/2)
+    nc = int((reachset.shape[1] - 8) / 2)
 
     num_invalid = 0
 
@@ -32,29 +31,33 @@ if __name__=="__main__":
         rx = rx[valid_idx]
         ry = ry[valid_idx]
 
-        fov_radius = x0[2] * np.tan(rocket.fov/2)
-    
+        fov_radius = x0[2] * np.tan(rocket.fov / 2)
+
         fig, ax = plt.subplots()
         # FOV circle
-        fov_circle = plt.Circle(x0[:2], fov_radius, fill=None, edgecolor='k', linestyle='--', label='Sensor Field of View')
+        fov_circle = plt.Circle(
+            x0[:2],
+            fov_radius,
+            fill=None,
+            edgecolor="k",
+            linestyle="--",
+            label="Sensor Field of View",
+        )
         ax.add_patch(fov_circle)
         # reachable set
         ax.scatter(rx, ry, label=str(idx))
         # points used for conic fitting
         xs, ys = extract_inner_points(rx, ry, fov_radius)
-        ax.scatter(xs, ys, color='g', marker='x', label='Points used for fitting')
+        ax.scatter(xs, ys, color="g", marker="x", label="Points used for fitting")
         # conic section
         x = np.linspace(np.min(xs), np.max(xs), 100)
         y = conic(x, xc, a, b)
-        ax.plot(x, y, color='r', linestyle='--', label='Conic Fit')
+        ax.plot(x, y, color="r", linestyle="--", label="Conic Fit")
         # focus
-        ax.scatter(xc, 0, color='r', marker='x', label='Focus')
+        ax.scatter(xc, 0, color="r", marker="x", label="Focus")
 
-        ax.axis('equal')
+        ax.axis("equal")
         ax.legend()
-        plt.title('a: {:.2f}, b: {:.2f}, xc: {:.2f}'.format(a, b, xc))
+        plt.title("a: {:.2f}, b: {:.2f}, xc: {:.2f}".format(a, b, xc))
         plt.grid()
         plt.show()
-
-        
-    

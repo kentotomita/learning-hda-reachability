@@ -7,8 +7,3 @@ from .problem import *
 from .rocket import *
 from .vis import *
 from .linear_dynamics import *
-
-
-
-
-

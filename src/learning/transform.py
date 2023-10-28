@@ -2,25 +2,25 @@ import numpy as np
 import torch
 
 # Parameters for NN input
-ALT_MAX = 1500.
-ALT_MIN = 100.
-TGO_MAX = 80.
-TGO_MIN = 0.
-VX_MAX = 50.
-VX_MIN = 0.
-VZ_MAX = 20.
-VZ_MIN = -90.
-MASS_MAX = 1825.
-MASS_MIN = 1505.
+ALT_MAX = 1500.0
+ALT_MIN = 100.0
+TGO_MAX = 80.0
+TGO_MIN = 0.0
+VX_MAX = 50.0
+VX_MIN = 0.0
+VZ_MAX = 20.0
+VZ_MIN = -90.0
+MASS_MAX = 1825.0
+MASS_MIN = 1505.0
 Z_MAX = torch.log(torch.tensor(MASS_MAX))
 Z_MIN = torch.log(torch.tensor(MASS_MIN))
 
 # Parameters for NN output
 FOV = torch.tensor(15 * 3.1415926535 / 180)
-FOV_R_MAX = ALT_MAX * torch.tan(FOV/2)
+FOV_R_MAX = ALT_MAX * torch.tan(FOV / 2)
 SMA_MAX = ALT_MAX * 10
 
-    
+
 def transform_ic(alt, vx, vz, z, tgo):
     """
     Transform initial conditions to normalized coordinates.
@@ -54,12 +54,12 @@ def inverse_transform_ic(alt_, vx_, vz_, z_, tgo_):
 def transform_reachsetparam(xmin, xmax, alpha, yp, a1, a2, alt, fov=FOV):
     """transform values to [0, 1]"""
     # normalize
-    fov_radius = (alt * np.tan(fov/2)) * 1.1  # 1.1 is a safety factor
+    fov_radius = (alt * np.tan(fov / 2)) * 1.1  # 1.1 is a safety factor
     length_max = fov_radius * 5
     xmin_ = (xmin + fov_radius) / fov_radius / 2
     xmax_ = (xmax - xmin) / fov_radius / 2
     alpha_ = alpha
-    yp_ = yp / fov_radius 
+    yp_ = yp / fov_radius
     a1_ = (a1 - alpha * (xmax - xmin) / 2) / length_max
     a2_ = (a2 - (1 - alpha) * (xmax - xmin) / 2) / length_max
 
@@ -68,12 +68,12 @@ def transform_reachsetparam(xmin, xmax, alpha, yp, a1, a2, alt, fov=FOV):
 
 def inverse_transform_reachsetparam(xmin_, xmax_, alpha_, yp_, a1_, a2_, alt, fov=FOV):
     # inverse normalize
-    fov_radius = (alt * np.tan(fov/2)) * 1.1  # 1.1 is a safety factor
+    fov_radius = (alt * np.tan(fov / 2)) * 1.1  # 1.1 is a safety factor
     length_max = fov_radius * 5
     xmin = xmin_ * fov_radius * 2 - fov_radius
     xmax = xmax_ * fov_radius * 2 + xmin
     alpha = alpha_
-    yp = yp_ * fov_radius 
+    yp = yp_ * fov_radius
     a1 = a1_ * length_max + alpha * (xmax - xmin) / 2
     a2 = a2_ * length_max + (1 - alpha) * (xmax - xmin) / 2
 

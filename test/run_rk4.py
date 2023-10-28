@@ -2,16 +2,18 @@ import numpy as np
 from numba import njit
 
 import sys
-sys.path.append('..')
+
+sys.path.append("..")
 
 from src.integrator import rk4
 
-if __name__=="__main__":
+if __name__ == "__main__":
+
     @njit
     def f(t, y):
         dydt = np.zeros(y.shape)
         dydt[0] = t * np.sqrt(y[1])  # Sample ODE: dy0/dt = t * sqrt(y1)
-        dydt[1] = y[0] * y[1]        # Sample ODE: dy1/dt = y0 * y1
+        dydt[1] = y[0] * y[1]  # Sample ODE: dy1/dt = y0 * y1
         return dydt
 
     @njit

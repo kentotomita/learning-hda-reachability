@@ -7,10 +7,16 @@ from typing import Tuple
 import matplotlib.pyplot as plt
 
 
-def load_sfmap(path: str, x_range: Tuple, y_range: Tuple, normalize: bool = True, dtype: str = 'float32'):
+def load_sfmap(
+    path: str,
+    x_range: Tuple,
+    y_range: Tuple,
+    normalize: bool = True,
+    dtype: str = "float32",
+):
     """Load safety map from path"""
     sfmap = np.load(path)
-    sfmap[np.isnan(sfmap)] = 0.
+    sfmap[np.isnan(sfmap)] = 0.0
     if normalize:
         sfmap = (sfmap - np.min(sfmap)) / (np.max(sfmap) - np.min(sfmap))
 
@@ -28,18 +34,17 @@ def load_sfmap(path: str, x_range: Tuple, y_range: Tuple, normalize: bool = True
 
     sfmap_tensor = sfmap_tensor.reshape(-1, 3)
 
-    if dtype == 'float32':
+    if dtype == "float32":
         sfmap_tensor = torch.from_numpy(sfmap_tensor).float()
-    elif dtype == 'float64':
+    elif dtype == "float64":
         sfmap_tensor = torch.from_numpy(sfmap_tensor).double()
     else:
-        raise ValueError('dtype must be either float32 or float64')
+        raise ValueError("dtype must be either float32 or float64")
 
-    
     return sfmap_tensor, (nr, nc)
 
 
-def make_simple_sfmap(x_range, y_range, n_points, dtype='float32'):
+def make_simple_sfmap(x_range, y_range, n_points, dtype="float32"):
     """Make safety map from scratch"""
 
     xmin, xmax = x_range
@@ -52,18 +57,19 @@ def make_simple_sfmap(x_range, y_range, n_points, dtype='float32'):
     sfmap[:, :, 0] = X
     sfmap[:, :, 1] = Y
     sfmap[:, :, 2] = X + Y
-    sfmap[:, :, 2] = (sfmap[:, :, 2] - np.min(sfmap[:, :, 2])) / (np.max(sfmap[:, :, 2]) - np.min(sfmap[:, :, 2]))
+    sfmap[:, :, 2] = (sfmap[:, :, 2] - np.min(sfmap[:, :, 2])) / (
+        np.max(sfmap[:, :, 2]) - np.min(sfmap[:, :, 2])
+    )
 
     sfmap = sfmap.reshape(-1, 3)
-    if dtype == 'float32':
+    if dtype == "float32":
         sfmap = torch.from_numpy(sfmap).float()
-    elif dtype == 'float64':
+    elif dtype == "float64":
         sfmap = torch.from_numpy(sfmap).double()
     else:
-        raise ValueError('dtype must be either float32 or float64')
-    
-    return sfmap, (n_points, n_points)
+        raise ValueError("dtype must be either float32 or float64")
 
+    return sfmap, (n_points, n_points)
 
 
 def visualize_sfmap(sfmap: Tensor, nskip: int = 1):
@@ -74,13 +80,13 @@ def visualize_sfmap(sfmap: Tensor, nskip: int = 1):
 
     fig, ax = plt.subplots()
 
-    ax.scatter(sf[:, 0], sf[:, 1], c=sf[:, 2], s=0.5, cmap='jet', alpha=0.8)
+    ax.scatter(sf[:, 0], sf[:, 1], c=sf[:, 2], s=0.5, cmap="jet", alpha=0.8)
 
-    sm = plt.cm.ScalarMappable(cmap='jet')
+    sm = plt.cm.ScalarMappable(cmap="jet")
 
-    ax.set_xlabel('x')
-    ax.set_ylabel('y')
-    ax.set_aspect('equal')
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_aspect("equal")
     ax.grid(True)
     plt.colorbar(sm)
     plt.show()

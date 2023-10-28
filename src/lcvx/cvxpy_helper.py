@@ -3,6 +3,7 @@
 import cvxpy as cp
 from cvxpy import Problem
 
+
 def set_params(problem: Problem, param: dict):
     """Set the optimization problem parameters.
 
@@ -34,14 +35,14 @@ def set_params(problem: Problem, param: dict):
 
 def get_vars(problem: Problem, varnames: list):
     """Get the variables from the optimization problem.
-    
+
     Args:
         problem (Problem): The optimization problem.
         varnames (list): The variable names.
 
     Returns:
         A list of variables.
-        
+
     Example:
         >>> from cvxpy_helper import get_vars
         >>> from cvxpy import Problem, Parameter, Variable, Minimize, norm

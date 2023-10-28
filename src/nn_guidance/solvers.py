@@ -4,7 +4,9 @@ from torch.optim import Adam
 from scipy.optimize import basinhopping
 
 
-def gradient_descent_multiple_starts(f, initial_guesses, bounds, learning_rate=0.01, num_epochs=1000):
+def gradient_descent_multiple_starts(
+    f, initial_guesses, bounds, learning_rate=0.01, num_epochs=1000
+):
     """Minimize function f using gradient descent with multiple initial guesses
 
     Args:
@@ -13,13 +15,13 @@ def gradient_descent_multiple_starts(f, initial_guesses, bounds, learning_rate=0
         bounds (list): bounds for x
         learning_rate (float, optional): learning rate. Defaults to 0.01.
         num_epochs (int, optional): number of epochs. Defaults to 1000.
-    
+
     Returns:
         torch.Tensor: best solution
-    
+
     """
     best_x = None
-    best_obj = float('inf')
+    best_obj = float("inf")
 
     for x0 in initial_guesses:
         # Apply gradient descent with the current initial guess
@@ -52,39 +54,44 @@ def adam_optimization(f, x0, bounds, lr=0.01, num_epochs=1000, tol=1e-6, verbose
         torch.Tensor: The optimal design variables that minimize the objective function.
     """
     x = Variable(x0.clone(), requires_grad=True)
-    lb, ub = torch.full_like(x, bounds[0]), torch.full_like(x, bounds[1])  # create lower and upper bound tensors
+    lb, ub = torch.full_like(x, bounds[0]), torch.full_like(
+        x, bounds[1]
+    )  # create lower and upper bound tensors
     best_x = x0.clone()
-    best_f_value = float('inf')
+    best_f_value = float("inf")
 
     # Initialize Adam optimizer
     optimizer = Adam([x], lr=lr)
-    
+
     for epoch in range(num_epochs):
         optimizer.zero_grad()  # clear previous gradients
 
         f_value = f(x)
         f_value.backward()  # compute the gradient
         optimizer.step()  # update parameters
-        
+
         # Apply bounds
         with torch.no_grad():
             x.data = torch.max(torch.min(x, ub), lb)
 
         # Check if the objective function value has increased
         if f_value > best_f_value + tol:
-            print(f"Terminating at epoch {epoch + 1} due to increase in objective function value.")
+            print(
+                f"Terminating at epoch {epoch + 1} due to increase in objective function value."
+            )
             break
-        
+
         # Update the best solution if current solution is better
         if f_value < best_f_value:
             best_x = x.clone()
             best_f_value = f_value
-        
+
         if verbose and epoch % 10 == 0:
-            print(f"Epoch {epoch + 1}/{num_epochs}, Current Objective Function Value = {f_value.item()}")
+            print(
+                f"Epoch {epoch + 1}/{num_epochs}, Current Objective Function Value = {f_value.item()}"
+            )
 
     return best_x
-
 
 
 def newton_method(f, x0, bounds, lr=0.01, num_epochs=1000, verbose=False, eps=1e-5):
@@ -104,13 +111,15 @@ def newton_method(f, x0, bounds, lr=0.01, num_epochs=1000, verbose=False, eps=1e
         torch.Tensor: The optimal design variables that minimize the objective function.
     """
     x = Variable(x0.clone(), requires_grad=True)
-    lb, ub = torch.full_like(x, bounds[0]), torch.full_like(x, bounds[1])  # create lower and upper bound tensors
+    lb, ub = torch.full_like(x, bounds[0]), torch.full_like(
+        x, bounds[1]
+    )  # create lower and upper bound tensors
     best_x = x0.clone()
-    best_f_value = float('inf')
+    best_f_value = float("inf")
 
     for epoch in range(num_epochs):
         f_value = f(x)
-        
+
         # Update the best solution if current solution is better
         if f_value < best_f_value:
             best_x = x.clone()
@@ -118,7 +127,7 @@ def newton_method(f, x0, bounds, lr=0.01, num_epochs=1000, verbose=False, eps=1e
 
         if x.grad is not None:
             x.grad.zero_()  # clear previous gradients
-            
+
         f_value.backward()  # compute the gradient
 
         # Compute approximate Hessian via finite differences
@@ -131,9 +140,11 @@ def newton_method(f, x0, bounds, lr=0.01, num_epochs=1000, verbose=False, eps=1e
 
         with torch.no_grad():
             if verbose and epoch % 10 == 0:
-                print(f"Epoch {epoch + 1}/{num_epochs}, Current Objective Function Value = {f_value.item()}")
+                print(
+                    f"Epoch {epoch + 1}/{num_epochs}, Current Objective Function Value = {f_value.item()}"
+                )
             x -= lr * grad2 / (hessian_approx + 1e-10)  # Update parameters
-            
+
             # Apply bounds
             x.data = torch.max(torch.min(x, ub), lb)
 
@@ -156,39 +167,49 @@ def gradient_descent(f, x0, bounds, lr=0.01, num_epochs=1000, verbose=False):
         torch.Tensor: The optimal design variables that minimize the objective function.
     """
     x = Variable(x0.clone(), requires_grad=True)
-    lb, ub = torch.full_like(x, bounds[0]), torch.full_like(x, bounds[1])  # create lower and upper bound tensors
+    lb, ub = torch.full_like(x, bounds[0]), torch.full_like(
+        x, bounds[1]
+    )  # create lower and upper bound tensors
     best_x = x0.clone()
-    best_f_value = float('inf')
+    best_f_value = float("inf")
 
     for epoch in range(num_epochs):
         f_value = f(x)
-        
+
         # Update the best solution if current solution is better
         if f_value < best_f_value:
             best_x = x.clone()
             best_f_value = f_value
-        
+
         if x.grad is not None:
             x.grad.zero_()  # clear previous gradients
-            
+
         f_value.backward()  # compute the gradient
-        
+
         with torch.no_grad():
             x -= lr * x.grad.detach()  # Detach gradients before in-place update
             # Apply bounds
             x.data = torch.max(torch.min(x, ub), lb)  # Directly update the data of x
-            
+
         if verbose and epoch % 10 == 0:
-            print(f"Epoch {epoch + 1}/{num_epochs}, Current Objective Function Value = {f_value.item()}")
+            print(
+                f"Epoch {epoch + 1}/{num_epochs}, Current Objective Function Value = {f_value.item()}"
+            )
 
     return best_x
 
 
-def basinhopping_torch(f: callable, x0: torch.Tensor, bounds: list=None, niter: int = 100, verbose: bool = False):
+def basinhopping_torch(
+    f: callable,
+    x0: torch.Tensor,
+    bounds: list = None,
+    niter: int = 100,
+    verbose: bool = False,
+):
     """Minimize function f using scipy.optimize.basinhopping
 
     Args:
-        f (callable): function compatible with Pytorch AD 
+        f (callable): function compatible with Pytorch AD
         x0 (torch.Tensor): initial guess. Must be a 1D array
         bounds (list): bounds for x, tuple of (min, max) pairs for each element in x. Example: [(0,1), (0,1), (0,1)] or [(0, 1)] for abbreviate form
         niter (int, optional): number of iterations. Defaults to 100.
@@ -211,9 +232,21 @@ def basinhopping_torch(f: callable, x0: torch.Tensor, bounds: list=None, niter: 
         y_torch = f(x_torch)
         y_torch.backward()
         return x_torch.grad.detach().numpy()
-    
+
     if bounds is None:
-        res = basinhopping(f_np, x0.detach().numpy(), niter=niter, minimizer_kwargs={"method": "L-BFGS-B", "jac": df_np}, disp=verbose)
+        res = basinhopping(
+            f_np,
+            x0.detach().numpy(),
+            niter=niter,
+            minimizer_kwargs={"method": "L-BFGS-B", "jac": df_np},
+            disp=verbose,
+        )
     else:
-        res = basinhopping(f_np, x0.detach().numpy(), niter=niter, minimizer_kwargs={"method": "L-BFGS-B", "jac": df_np, "bounds": bounds}, disp=verbose)
+        res = basinhopping(
+            f_np,
+            x0.detach().numpy(),
+            niter=niter,
+            minimizer_kwargs={"method": "L-BFGS-B", "jac": df_np, "bounds": bounds},
+            disp=verbose,
+        )
     return torch.Tensor(res.x)

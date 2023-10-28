@@ -4,7 +4,7 @@ import numpy as np
 
 def isolated_active_set_gs(r: np.ndarray, gsa: float):
     """Check if glide slope constraint is active only at the isolated points.
-    
+
     Args:
         r (np.ndarray): The position vector, shape (3, N).
         gsa (float): The glide slope angle in radians.
@@ -17,10 +17,12 @@ def isolated_active_set_gs(r: np.ndarray, gsa: float):
 
     N = r.shape[1]
     rf = r[:, -1]
-    active = lambda r, rf, gsa: np.sqrt((r[0] - rf[0])**2 + (r[1] - rf[1])**2) * np.tan(gsa) >= abs(r[2] - rf[2]) 
+    active = lambda r, rf, gsa: np.sqrt(
+        (r[0] - rf[0]) ** 2 + (r[1] - rf[1]) ** 2
+    ) * np.tan(gsa) >= abs(r[2] - rf[2])
     flag = True
-    for i in range(N-1):
-        if active(r[:, i], rf, gsa) and active(r[:, i+1], rf, gsa):
+    for i in range(N - 1):
+        if active(r[:, i], rf, gsa) and active(r[:, i + 1], rf, gsa):
             flag = False
             return flag, i
     return flag, None
@@ -43,7 +45,7 @@ def active_slack_var(u: np.ndarray, sigma: np.ndarray, tol=1e-6):
     N = u.shape[1]
     u_norm = np.linalg.norm(u, axis=0)
     flag = True
-    for i in range(N-1):
+    for i in range(N - 1):
         if abs(u_norm[i] - sigma[i]) > tol:
             flag = False
             return flag, i

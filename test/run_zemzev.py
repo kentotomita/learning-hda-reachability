@@ -4,30 +4,34 @@ from numba import njit
 from scipy.integrate import solve_ivp
 
 import sys
-sys.path.append('../')
+
+sys.path.append("../")
 
 from src.dynamics import pd_3dof_eom
-from src.integrator import  rk4
+from src.integrator import rk4
 from src.zemzev import zemzev, tgo_zemzev
 
 
 def plot_3d_trajectory(x, y, z):
     fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    ax.plot(x, y, z, 'b-', linewidth=2)
-    ax.set_xlabel('X axis')
-    ax.set_ylabel('Y axis')
-    ax.set_zlabel('Z axis')
+    ax = fig.add_subplot(111, projection="3d")
+    ax.plot(x, y, z, "b-", linewidth=2)
+    ax.set_xlabel("X axis")
+    ax.set_ylabel("Y axis")
+    ax.set_zlabel("Z axis")
     plt.show()
+
 
 if __name__ == "__main__":
     print("Running Zemzev Guidance Law")
     # Simulation parameters
     g = np.array([0, 0, -3.7114])  # Gravitational acceleration (m/s^2)
     alpha = 4.53 * 10**-4  # Fuel consumption rate (kg/N)
-    Tmax = 13260 # Maximum thrust (N)
-    Tmin = 4972 # Minimum thrust (N)
-    x0 = np.array([2000., 0., 1500., -100., 30., -25., 1905.])  # Initial state vector (m, m, m, m/s, m/s, m/s, kg)
+    Tmax = 13260  # Maximum thrust (N)
+    Tmin = 4972  # Minimum thrust (N)
+    x0 = np.array(
+        [2000.0, 0.0, 1500.0, -100.0, 30.0, -25.0, 1905.0]
+    )  # Initial state vector (m, m, m, m/s, m/s, m/s, kg)
     target = np.array([0, 0, 0, 0, 0, 0])  # Final state vector (m, m, m, m/s, m/s, m/s)
     t0 = 0  # Initial time (s)
     dt = 0.001  # Time step (s)
@@ -55,4 +59,3 @@ if __name__ == "__main__":
 
     # Print results
     plot_3d_trajectory(x[:, 0], x[:, 1], x[:, 2])
-
