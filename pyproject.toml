@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "learn-reach"
+version = "0.1.0"
+description = ""
+authors = ["Kento <ktomita3@gatech.edu>"]
+license = "MIT"
+readme = "README.md"
+packages = [{include = "learn_reach"}]
+
+[tool.poetry.dependencies]
+python = "3.9.18"
+cvxpy = "^1.4.1"
+torch = "^1.0.2"
+numpy = "^1.26.1"
+scipy = "^1.11.3"
+matplotlib = "^3.8.0"
+tqdm = "^4.66.1"
+pandas = "^2.1.2"
+numba = "^0.58.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

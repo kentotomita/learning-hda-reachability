@@ -1,3 +1,4 @@
+"""Solve the minimum-fuel problem for a rocket landing on Mars."""
 import numpy as np
 import cvxpy as cp
 import sys
@@ -16,7 +17,7 @@ def config():
         rho1=4972.,
         rho2=13260.,
         gsa=25 * np.pi / 180,
-        pa=40 * np.pi / 180,
+        pa=30 * np.pi / 180,
         vmax=None
     )
     N = 55
@@ -61,36 +62,9 @@ if __name__=="__main__":
     rocket, x0, N, tf, dt = config()
     print(f'x0: {x0}')
 
-
-    # Test no parameterization
     lcvx_obj = lc.LCvxMinFuel(rocket=rocket, N=N, parameterize_x0=False, parameterize_tf=False, fixed_target=True)
     prob = lcvx_obj.problem(x0=x0, tf=tf)
     prob.solve(verbose=True)
-    vis_results(prob, rocket)
-
-    # Test parameterize x0
-    lcvx_obj = lc.LCvxMinFuel(rocket=rocket, N=N, parameterize_x0=True, parameterize_tf=False, fixed_target=True)
-    prob = lcvx_obj.problem(tf=tf)
-    lc.set_params(prob, {'x0': x0})
-    prob.solve(verbose=False)
-    vis_results(prob, rocket)
-
-
-    # Test parameterize tf
-    lcvx_obj = lc.LCvxMinFuel(rocket=rocket, N=N, parameterize_x0=False, parameterize_tf=True, fixed_target=True)
-    prob = lcvx_obj.problem(x0=x0)
-    lc.set_params(prob, {'tf': tf})
-    lc.set_params(prob, {'dt22': dt**2/2})
-    prob.solve(verbose=False)
-    vis_results(prob, rocket)
-
-    # Test parameterize x0 and tf
-    lcvx_obj = lc.LCvxMinFuel(rocket=rocket, N=N, parameterize_x0=True, parameterize_tf=True, fixed_target=True)
-    prob = lcvx_obj.problem()
-    lc.set_params(prob, {'x0': x0})
-    lc.set_params(prob, {'tf': tf})
-    lc.set_params(prob, {'dt22': dt**2/2})
-    prob.solve(verbose=False)
     vis_results(prob, rocket)
 
     
