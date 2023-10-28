@@ -1,4 +1,4 @@
-"""Implement discrete-time system discretization methods. 
+"""Implement discrete-time system discretization methods.
 
 References:
 - https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.cont2discrete.html
@@ -56,7 +56,6 @@ def zoh_cp(
     """Zero-order hold discretization when dt is a cvxpy variable."""
 
     n = A.shape[0]  # number of states
-    m = B.shape[1]  # number of inputs
 
     if p is None:
         p = np.zeros((n, 1))

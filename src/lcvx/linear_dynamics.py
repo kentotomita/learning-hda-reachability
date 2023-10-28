@@ -1,4 +1,4 @@
-"""Relaxed linear dynamics for LCVx. The equality constraint between 
+"""Relaxed linear dynamics for LCVx. The equality constraint between
 the thrust vector and thrust norm is relaxed, resulting in decoupled linear dynamics."""
 
 import numpy as np

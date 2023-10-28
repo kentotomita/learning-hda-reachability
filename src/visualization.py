@@ -88,7 +88,6 @@ def plot_3sides(
         zmin, zmax = axs[1, 1].get_ylim()
         x_range = np.linspace(xmin, xmax, 100)
         y_range = np.linspace(ymin, ymax, 100)
-        z_range = np.linspace(zmin, zmax, 100)
         axs[1, 0].plot(
             x_range,
             np.tan(gsa) * np.abs(x_range - x[-1]),

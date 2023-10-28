@@ -43,7 +43,6 @@ def convert_to_x0(sample: np.ndarray):
 
 @njit
 def vz_bound(alt):
-    n = len(alt)
     ymax = 10 - 10 / 1500 * alt
     ymin = -20 + (-50 - (-20)) / 250 * alt
     mask1 = alt > 250

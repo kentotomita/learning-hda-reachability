@@ -46,9 +46,7 @@ def sim_feedback(
         if t_ >= tg[ig + 1]:
             # print('Updating control input at t = {:.2f} s'.format(t_))
             ig += 1
-            tg_ = t_  # guidance time
-            xg_ = x_  # state at guidance time
-            u_ = u(tg_, x_)  # control input at guidance time
+            u_ = u(t_, x_)  # control input at guidance time
 
         # print('t = {:.2f} s, x = {:.2f} m, u = {:.2f} m/s^2'.format(t_, X[i, 2], U[i, 2]))
         k1 = f(t_, x_, u_)
