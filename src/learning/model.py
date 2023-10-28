@@ -99,36 +99,3 @@ class NeuralReach(MLP):
             dropout_rate,
             use_double_precision,
         )
-
-
-"""
-class MLP(nn.Module):  # Double precision MLP
-    def __init__(self, 
-                 input_dim: int, 
-                 output_dim: int, 
-                 hidden_layers: List[int], 
-                 activation_fn: Callable = nn.ReLU(), 
-                 output_activation: Callable = nn.Identity()):
-        
-        super(MLP, self).__init__()
-        
-        self.layers = nn.ModuleList()
-        
-        # Create the hidden layers
-        prev_layer_dim = input_dim
-        for layer_dim in hidden_layers:
-            self.layers.append(nn.Linear(prev_layer_dim, layer_dim))
-            self.layers.append(activation_fn)
-            prev_layer_dim = layer_dim
-        
-        # Create the output layer
-        self.layers.append(nn.Linear(prev_layer_dim, output_dim))
-        self.layers.append(output_activation)
-
-        self.double()  # Convert to double precision
-
-    def forward(self, x):
-        for layer in self.layers:
-            x = layer(x)
-        return x
-"""
