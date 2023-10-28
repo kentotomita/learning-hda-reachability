@@ -2,23 +2,25 @@ import unittest
 import numpy as np
 import src.lcvx as lc
 
-class TestLCVxMinFuel(unittest.TestCase):
 
+class TestLCVxMinFuel(unittest.TestCase):
     def setUp(self):
         # Simulation parameters
         self.rocket = lc.Rocket(
             g_=3.7114,  # Gravitational acceleration (m/s^2)
-            mdry=1505., # Dry mass (kg)
-            mwet=1905.,  # Wet mass (kg)
-            Isp=225.,
-            rho1=4972.,   # Minimum thrust (N)
-            rho2=13260.,  # Maximum thrust (N)
+            mdry=1505.0,  # Dry mass (kg)
+            mwet=1905.0,  # Wet mass (kg)
+            Isp=225.0,
+            rho1=4972.0,  # Minimum thrust (N)
+            rho2=13260.0,  # Maximum thrust (N)
             gsa=25 * np.pi / 180,
             pa=40 * np.pi / 180,
-            vmax=None
+            vmax=None,
         )
-        self.x0 = np.array([2000., 500., 1500., -100., 50., -75., np.log(self.rocket.mwet)])
-        self.tf = 75.
+        self.x0 = np.array(
+            [2000.0, 500.0, 1500.0, -100.0, 50.0, -75.0, np.log(self.rocket.mwet)]
+        )
+        self.tf = 75.0
         self.N = 55
         self.dt = self.tf / self.N
 
@@ -35,7 +37,7 @@ class TestLCVxMinFuel(unittest.TestCase):
         prob.solve(verbose=False)
 
         # Assert problem is solved
-        self.assertTrue(prob.status == 'optimal')
+        self.assertTrue(prob.status == "optimal")
 
     def test_param_x0(self):
         """Test problem with parameterization of x0"""
@@ -47,8 +49,8 @@ class TestLCVxMinFuel(unittest.TestCase):
             fixed_target=True,
         )
         prob = lcvx_obj.problem(tf=self.tf)
-        lc.set_params(prob, {'x0': self.x0})
+        lc.set_params(prob, {"x0": self.x0})
         prob.solve(verbose=False)
 
         # Assert problem is solved
-        self.assertTrue(prob.status == 'optimal')
+        self.assertTrue(prob.status == "optimal")

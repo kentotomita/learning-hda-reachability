@@ -1,0 +1,11 @@
+repos:
+  - repo: https://github.com/psf/black
+    rev: stable
+    hooks:
+      - id: black
+        language_version: python3.9  # or any required Python version
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 3.9.2  # Use the latest from https://github.com/pycqa/flake8/releases
+    hooks:
+      - id: flake8
