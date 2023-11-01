@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
 import src.lcvx as lc
+import cvxpy as cp
 
 
 class TestLCVxMinFuel(unittest.TestCase):
@@ -34,7 +35,7 @@ class TestLCVxMinFuel(unittest.TestCase):
             fixed_target=True,
         )
         prob = lcvx_obj.problem(x0=self.x0, tf=self.tf)
-        prob.solve(verbose=False)
+        prob.solve(solver=cp.ECOS, verbose=False)
 
         # Assert problem is solved
         self.assertTrue(prob.status == "optimal")
@@ -50,7 +51,7 @@ class TestLCVxMinFuel(unittest.TestCase):
         )
         prob = lcvx_obj.problem(tf=self.tf)
         lc.set_params(prob, {"x0": self.x0})
-        prob.solve(verbose=False)
+        prob.solve(solver=cp.ECOS, verbose=False)
 
         # Assert problem is solved
         self.assertTrue(prob.status == "optimal")

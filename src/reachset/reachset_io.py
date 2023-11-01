@@ -208,8 +208,9 @@ def read_reachset(fpath: str = "reachset.json", nmax: int = None):
     with open(fpath, "r") as f:
         reachset_data = json.load(f)
 
+    g_ = -np.array(reachset_data["rocket"]["g"])[2]
     rocket = Rocket(
-        reachset_data["rocket"]["g"],  # Gravitational acceleration (m/s^2)
+        g_,  # Gravitational acceleration (m/s^2)
         reachset_data["rocket"]["mdry"],  # Dry mass (kg)
         reachset_data["rocket"]["mwet"],  # Wet mass (kg)
         reachset_data["rocket"]["Isp"],

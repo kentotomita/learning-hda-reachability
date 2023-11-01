@@ -2,7 +2,7 @@ import numpy as np
 import cvxpy as cp
 import sys
 
-sys.path.append("../../")
+sys.path.append("../")
 
 import src.lcvx as lc
 from src.visualization import *
@@ -32,6 +32,7 @@ def config():
 def vis_results(solved_problem, rocket):
     print(f"Problem is DCP: {solved_problem.is_dcp()}")
     print(f"Problem is DPP: {solved_problem.is_dpp()}")
+    print(f"Problem is DGP: {solved_problem.is_dgp()}")
 
     sol = lc.get_vars(solved_problem, ["X", "U"])
     X_sol = sol["X"]
@@ -62,19 +63,12 @@ if __name__ == "__main__":
     rocket, x0, N, tf, dt = config()
     c = np.array([0.0, 1.0, 0.0])
 
-    # Test no parameterization
-    lcvx_obj = lc.LCvxMaxRange(
-        rocket=rocket, N=N, parameterize_x0=False, parameterize_c=False
-    )
-    prob = lcvx_obj.problem(x0=x0, tf=tf, c=c, rc=np.zeros(3))
-    prob.solve(verbose=True)
-    vis_results(prob, rocket)
-
+    #"""
     # Test parameterize x0
     lcvx_obj = lc.LCvxMaxRange(
         rocket=rocket, N=N, parameterize_x0=True, parameterize_c=False
     )
-    prob = lcvx_obj.problem(tf=tf, c=c)
+    prob = lcvx_obj.problem(tf=tf, c=c, rc=np.zeros(3))
     lc.set_params(prob, {"x0": x0})
     prob.solve(verbose=True, requires_grad=True)
     vis_results(prob, rocket)
@@ -83,16 +77,17 @@ if __name__ == "__main__":
     lcvx_obj = lc.LCvxMaxRange(
         rocket=rocket, N=N, parameterize_x0=False, parameterize_c=True
     )
-    prob = lcvx_obj.problem(x0=x0, tf=tf)
+    prob = lcvx_obj.problem(x0=x0, tf=tf, rc=np.zeros(3))
     lc.set_params(prob, {"c": c})
     prob.solve(verbose=True, requires_grad=True)
     vis_results(prob, rocket)
+    #"""
 
     # Test parameterize x0 and c
     lcvx_obj = lc.LCvxMaxRange(
         rocket=rocket, N=N, parameterize_x0=True, parameterize_c=True
     )
-    prob = lcvx_obj.problem(tf=tf)
+    prob = lcvx_obj.problem(tf=tf, rc=np.zeros(3))
     lc.set_params(prob, {"x0": x0})
     lc.set_params(prob, {"c": c})
     prob.solve(verbose=True, requires_grad=False)
