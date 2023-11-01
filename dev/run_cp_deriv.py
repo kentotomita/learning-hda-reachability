@@ -63,7 +63,7 @@ if __name__ == "__main__":
     rocket, x0, N, tf, dt = config()
     c = np.array([0.0, 1.0, 0.0])
 
-    #"""
+    # """
     # Test parameterize x0
     lcvx_obj = lc.LCvxMaxRange(
         rocket=rocket, N=N, parameterize_x0=True, parameterize_c=False
@@ -81,7 +81,7 @@ if __name__ == "__main__":
     lc.set_params(prob, {"c": c})
     prob.solve(verbose=True, requires_grad=True)
     vis_results(prob, rocket)
-    #"""
+    # """
 
     # Test parameterize x0 and c
     lcvx_obj = lc.LCvxMaxRange(
