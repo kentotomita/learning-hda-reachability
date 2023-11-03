@@ -1,7 +1,7 @@
 import numpy as np
 import cvxpy as cp
 
-from typing import Tuple, List
+from typing import Tuple, List, Union
 
 from .discretization import zoh
 from .rocket import Rocket
@@ -9,10 +9,7 @@ from .rocket import Rocket
 __all__ = [
     "LCvxProblem",
     "LCvxMinFuel",
-    "LCvxMaxRange",
-    "LCvxReach",
-    "LCvxReachVxy",
-    "LCvxReachVz",
+    "LCvxReachability",
 ]
 
 
@@ -320,137 +317,26 @@ class LCvxMinFuel(LCvxProblem):
         return cstr
 
 
-class LCvxMaxRange(LCvxProblem):
-    def __init__(
-        self,
-        rocket: Rocket,
-        N: int,
-        parameterize_tf: bool = False,
-        parameterize_x0: bool = False,
-        parameterize_c: bool = False,
-        parameterize_rc: bool = False,
-    ):
-        """Landing problem for maximum soft landing range.
+class LCvxReachability(LCvxProblem):
+    """Reachability problems; given a bounded initial state set, compute the reachable set. 
+    The final altitude and the final velocity are fixed at zero."""
 
-        Args:
-            rocket: Rocket model.
-            N: Number of discretization points.
-            parameterize_tf: If True, the final time is a parameter.
-            parameterize_x0: If True, the initial state is a parameter.
-            parameterize_c: If True, the maximum range direction is a parameter.
-            parameterize_rc: If True, the center position from which range is maximized is a parameter.
-        """
-        super().__init__(
-            rocket, N, parameterize_tf=parameterize_tf, parameterize_x0=parameterize_x0
-        )
-        self.parameterize_c = parameterize_c
-        self.parameterize_rc = parameterize_rc
-
-    def problem(
-        self,
-        x0: np.ndarray = None,
-        tf: np.ndarray = None,
-        c: np.ndarray = None,
-        rc: np.ndarray = None,
-    ) -> cp.Problem:
-        """Define the optimization problem.
-
-        Args:
-            x0: Initial state.
-            tf: Final time.
-            c: Maximum range direction.
-            rc: Center position from which range is maximized.
-
-        Returns:
-            A cvxpy problem.
-        """
-        # Problem parameters
-        x0, tf, dt, t, dt22 = self._parameters(x0, tf)
-        if self.parameterize_c:
-            c = cp.Parameter(3, name="c")
-        else:
-            assert c is not None, "c must be provided if parameterize_c is False"
-        if self.parameterize_rc:
-            rc = cp.Parameter(3, name="rc")
-        else:
-            assert rc is not None, "rc must be provided if parameterize_rc is False"
-
-        # Problem variables
-        X = cp.Variable((7, self.N + 1), name="X")  # state variables
-        U = cp.Variable((4, self.N), name="U")  # control variables
-
-        # Recovered variables
-        r, v, z, u, sigma = self.recover_variables(X, U)
-
-        # Problem constraints
-        cstr = self._lcvx_constraints(
-            params=(x0, tf, dt, t, dt22), vars=(r, v, z, u, sigma)
-        )
-        cstr += self._boundary_cstr(vars=(r, v, z, u, sigma), x0=x0, c=c, rc=rc)
-
-        # Problem objective
-        rf = r[:, -1] - rc[:3]  # final position relative to initial position
-        obj = cp.Maximize(cp.sum(c @ rf))
-        # k = self.R_ref / (self.Acc_ref * self.N) * 1e-9  # scaling factor
-        # obj = cp.Minimize(k * cp.sum(sigma) * dt - cp.sum(c @ rf))
-
-        return cp.Problem(obj, cstr)
-
-    def _boundary_cstr(
-        self,
-        vars: Tuple[cp.Variable],
-        x0: np.ndarray or cp.Parameter,
-        c: np.ndarray or cp.Parameter,
-        rc: np.ndarray,
-    ):
-        """Boundary conditions
-
-        Args:
-            vars: Tuple of cvxpy variables: r, v, m, u, sigma.
-            x0: Initial state.
-            c: Maximum range direction.
-            rf: Final position.
-        """
-        r, v, z, _, _ = vars
-
-        # Initial conditions
-        cstr = [r[:, 0] == x0[:3]]  # initial position
-        cstr.append(v[:, 0] == x0[3:6])  # initial velocity
-        cstr.append(z[0] == x0[6])  # initial log(mass)
-
-        # Final conditions
-        rf = r[:, -1] - rc[:3]  # final position relative to the center
-        cstr.append(
-            rf[0] * c[1] - rf[1] * c[0] == 0
-        )  # final position is parallel to maximum range direction
-        cstr.append(r[2, -1] == 0)  # target altitude is zero
-        cstr += [v[:, -1] == np.zeros(3)]  # soft landing; v = 0 at final time
-        cstr.append(
-            z[-1] >= np.log(self.rocket.mdry)
-        )  # final log(mass) >= log(dry mass)
-
-        return cstr
-
-
-class LCvxReach(LCvxProblem):
-    """Base class for reachability problems exept for the soft landing reachability problem."""
-
-    def __init__(self, rocket: Rocket, N: int, maxk: int, inner: bool = False):
+    def __init__(self, rocket: Rocket, N: int, maxk: int, directional_cstr: Union[bool, List[bool]] = False):
         """Landing problem for computing a reachable set at a specific step.
 
         Args:
             rocket: Rocket model.
             N: Number of discretization points.
             maxk: Step at which the maximization is performed.
-            inner: If True, the reachable set is computed for the inner approximation. This imposes directional constraints.
+            directional_cstr: Directional constraints for each state.
         """
         super().__init__(rocket, N)
         self.maxk = maxk
-        self.inner = inner
+        self.directional_cstr = directional_cstr
 
     def _boundary_cstr(self, vars: Tuple[cp.Variable], x0_bounds: Tuple[np.ndarray]):
-        """Boundary conditions. Inital states are bounded, final states are free.
-
+        """Boundary conditions. Inital states are bounded by definition. Final states are fixed for altitude and velocity.
+        
         Args:
             vars: Tuple of cvxpy variables: r, v, m, u, sigma.
             x0_bounds: Initial state bounds.
@@ -474,33 +360,25 @@ class LCvxReach(LCvxProblem):
         )  # final log(mass) >= log(dry mass)
 
         return cstr
-
-
-class LCvxReachVxy(LCvxReach):
-    """Landing problem for computing a reachable set of horizontal velocity."""
-
+    
     def problem(
         self,
         x0_bounds: Tuple[np.ndarray],
-        tf: np.ndarray,
-        vc: np.ndarray = None,
-        cstr_add: List = None,
+        tf: float,
+        xc: np.ndarray = None,
     ) -> cp.Problem:
-        """Define the optimization problem.
-
+        """Define the reachability problem.
         Args:
             x0_bounds: Initial state bounds.
             tf: Final time.
-            vc: Center velocity from which range is maximized. Shape: (2,) for x and y components.
-            cst_add: Additional constraints.
-
-        Returns:
-            A cvxpy problem.
+            xc: Center state from which range is maximized. Shape: (7,) for x, y, z, vx, vy, vz, log(mass).
         """
+        assert xc is not None or self.inner is False, "center state must be provided if reachability is computed for the inner approximation."
+        
         # Problem parameters
         dt = tf / self.N
         t = np.array([i * dt for i in range(self.N + 1)])
-        c = cp.Parameter(2, name="c")  # maximum velocity direction
+        c = cp.Parameter(7, name="c")  # maximum state direction
 
         # Problem variables
         X = cp.Variable((7, self.N + 1), name="X")  # state variables
@@ -515,106 +393,25 @@ class LCvxReachVxy(LCvxReach):
         )
         cstr += self._boundary_cstr(vars=(r, v, z, u, sigma), x0_bounds=x0_bounds)
 
-        # Additional constraints
-        if cstr_add is not None:
-            cstr += cstr_add(v)
-
         # Problem objective
-        if vc is None:
-            vc = np.zeros(2)
-        vk = v[:2, self.maxk] - vc  # velocity at maximization step
-        if self.inner:
-            cstr += [
-                vk[0] * c[1] - vk[1] * c[0] == 0
-            ]  # velocity is parallel to maximum velocity direction
-        obj = cp.Maximize(cp.sum(c @ vk))
+        if xc is None:
+            xc = np.zeros(7)
+        xk = [
+            r[0, self.maxk], r[1, self.maxk], r[2, self.maxk],
+            v[0, self.maxk], v[1, self.maxk], v[2, self.maxk],
+            z[self.maxk],
+        ]
+        xk = [xk[i] - xc[i] for i in range(7)]  # state at maximization step relative to the center state
+        
+        if self.directional_cstr:  # state vector from the given center has to be parallel to the maximum state direction
+            xk_masked = [xk[i] for i in range(7) if self.directional_cstr[i]]
+            c_masked = [c[i] for i in range(7) if self.directional_cstr[i]]
+            for i in range(len(xk_masked)):
+                cstr += [
+                    xk_masked[0] * c_masked[i] - xk_masked[i] * c_masked[0] == 0
+                ]
+
+        obj = cp.Maximize(cp.sum([c[i] * xk[i] for i in range(7)]))
 
         return cp.Problem(obj, cstr)
 
-
-class LCvxReachVz(LCvxReach):
-    """Landing problem for computing a reachable set of vertical velocity."""
-
-    def problem(
-        self, x0_bounds: Tuple[np.ndarray], tf: np.ndarray, cstr_add: List = None
-    ) -> cp.Problem:
-        """Define the optimization problem.
-
-        Args:
-            x0_bounds: Initial state bounds.
-            tf: Final time.
-
-        Returns:
-            A cvxpy problem.
-        """
-        # Problem parameters
-        dt = tf / self.N
-        t = np.array([i * dt for i in range(self.N + 1)])
-        c = cp.Parameter(name="c")  # maximum velocity direction
-
-        # Problem variables
-        X = cp.Variable((7, self.N + 1), name="X")  # state variables
-        U = cp.Variable((4, self.N), name="U")  # control variables
-
-        # Recovered variables
-        r, v, z, u, sigma = self.recover_variables(X, U)
-
-        # Problem constraints
-        cstr = self._lcvx_constraints(
-            params=(None, tf, dt, t, None), vars=(r, v, z, u, sigma)
-        )
-        cstr += self._boundary_cstr(vars=(r, v, z, u, sigma), x0_bounds=x0_bounds)
-
-        # Additional constraints
-        if cstr_add is not None:
-            cstr += cstr_add(v)
-
-        # Problem objective
-        vk = v[2, self.maxk]  # velocity at maximization step
-        obj = cp.Maximize(c * vk)  # c is the maximum velocity direction; 1 or -1
-
-        return cp.Problem(obj, cstr)
-
-
-class LCvxReachMass(LCvxReach):
-    """Landing problem for computing a reachable set of vertical velocity."""
-
-    def problem(
-        self, x0_bounds: Tuple[np.ndarray], tf: np.ndarray, cstr_add: List = None
-    ) -> cp.Problem:
-        """Define the optimization problem.
-
-        Args:
-            x0_bounds: Initial state bounds.
-            tf: Final time.
-
-        Returns:
-            A cvxpy problem.
-        """
-        # Problem parameters
-        dt = tf / self.N
-        t = np.array([i * dt for i in range(self.N + 1)])
-        c = cp.Parameter(name="c")  # maximum velocity direction
-
-        # Problem variables
-        X = cp.Variable((7, self.N + 1), name="X")  # state variables
-        U = cp.Variable((4, self.N), name="U")  # control variables
-
-        # Recovered variables
-        r, v, z, u, sigma = self.recover_variables(X, U)
-
-        # Problem constraints
-        cstr = self._lcvx_constraints(
-            params=(None, tf, dt, t, None), vars=(r, v, z, u, sigma)
-        )
-        cstr += self._boundary_cstr(vars=(r, v, z, u, sigma), x0_bounds=x0_bounds)
-
-        # Additional constraints
-        if cstr_add is not None:
-            cstr += cstr_add(v)
-
-        # Problem objective
-        zk = z[self.maxk]  # velocity at maximization step
-        obj = cp.Maximize(c * zk)  # c is the maximum velocity direction; 1 or -1
-
-        return cp.Problem(obj, cstr)
