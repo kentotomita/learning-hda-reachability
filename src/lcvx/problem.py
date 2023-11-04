@@ -10,6 +10,7 @@ __all__ = [
     "LCvxProblem",
     "LCvxMinFuel",
     "LCvxReachability",
+    "LCvxControllability",
 ]
 
 
@@ -373,7 +374,6 @@ class LCvxReachability(LCvxProblem):
             tf: Final time.
             xc: Center state from which range is maximized. Shape: (7,) for x, y, z, vx, vy, vz, log(mass).
         """
-        assert xc is not None or self.inner is False, "center state must be provided if reachability is computed for the inner approximation."
         
         # Problem parameters
         dt = tf / self.N
@@ -415,3 +415,98 @@ class LCvxReachability(LCvxProblem):
 
         return cp.Problem(obj, cstr)
 
+
+class LCvxControllability(LCvxProblem):
+    """Controllability problem class; given a bounded terminal state set, compute the feasible initial state set.""" 
+
+    def __init__(self, rocket: Rocket, N: int, alt0: float):
+        """Landing problem for computing a controllable set.
+
+        Args:
+            rocket: Rocket model.
+            N: Number of discretization points.
+            alt0: Initial altitude.
+        """
+        super().__init__(rocket, N)
+        self.alt0 = alt0
+
+    def _boundary_cstr(self, vars: Tuple[cp.Variable], xf_bounds: Tuple[np.ndarray]):
+        """Boundary conditions. Terminal states are bounded by definition. Initial states are fixed for altitude.
+        
+        Args:
+            vars: Tuple of cvxpy variables: r, v, m, u, sigma.
+            xf_bounds: Terminal state bounds.
+        """
+        r, v, z, _, _ = vars
+        xf_min, xf_max = xf_bounds
+
+        # Terminal conditions
+        cstr = [r[:, -1] >= xf_min[:3]]  # position
+        cstr.append(r[:, -1] <= xf_max[:3])
+        cstr.append(v[:, -1] >= xf_min[3:6])  # velocity
+        cstr.append(v[:, -1] <= xf_max[3:6])
+        cstr.append(z[-1] >= xf_min[6])  # log(mass)
+        cstr.append(z[-1] <= xf_max[6])
+        cstr.append(
+            z[-1] >= np.log(self.rocket.mdry)
+        )  # final log(mass) >= log(dry mass)
+
+        # Initial conditions
+        cstr.append(r[2, 0] == self.alt0)  # initial altitude is specified
+
+        return cstr
+    
+    def problem(
+        self,
+        xf_bounds: Tuple[np.ndarray],
+        tf: float,
+        xc: np.ndarray = None,
+        directional_cstr: Union[bool, List[bool]] = False
+    ) -> cp.Problem:
+        """Define the reachability problem.
+        Args:
+            xf_bounds: Terminal state bounds.
+            tf: Final time.
+            xc: Center state from which range is maximized. Shape: (7,) for x, y, z, vx, vy, vz, log(mass).
+            directional_cstr: Directional constraints for each state.
+        """
+        
+        # Problem parameters
+        dt = tf / self.N
+        t = np.array([i * dt for i in range(self.N + 1)])
+        c = cp.Parameter(7, name="c")  # maximum state direction
+
+        # Problem variables
+        X = cp.Variable((7, self.N + 1), name="X")  # state variables
+        U = cp.Variable((4, self.N), name="U")  # control variables
+
+        # Recovered variables
+        r, v, z, u, sigma = self.recover_variables(X, U)
+
+        # Problem constraints
+        cstr = self._lcvx_constraints(
+            params=(None, tf, dt, t, None), vars=(r, v, z, u, sigma)
+        )
+        cstr += self._boundary_cstr(vars=(r, v, z, u, sigma), xf_bounds=xf_bounds)
+
+        # Problem objective
+        if xc is None:
+            xc = np.zeros(7)
+        x0 = [
+            r[0, 0], r[1, 0], r[2, 0],
+            v[0, 0], v[1, 0], v[2, 0],
+            z[0],
+        ]
+        x0 = [x0[i] - xc[i] for i in range(7)]  # initial state relative to the center state
+        
+        if directional_cstr:  # state vector from the given center has to be parallel to the maximum state direction
+            x0_masked = [x0[i] for i in range(7) if directional_cstr[i]]
+            c_masked = [c[i] for i in range(7) if directional_cstr[i]]
+            for i in range(len(x0_masked)):
+                cstr += [
+                    x0_masked[0] * c_masked[i] - x0_masked[i] * c_masked[0] == 0
+                ]
+
+        obj = cp.Maximize(cp.sum([c[i] * x0[i] for i in range(7)]))
+
+        return cp.Problem(obj, cstr)
