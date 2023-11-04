@@ -22,7 +22,7 @@ class Rocket:
     Isp: float  # Specific impulse (s)
     rho1: float  # Minimum thrust (N)
     rho2: float  # Maximum thrust (N)
-    gsa: float = None  # Glide slope angle (rad)
+    gsa: float = None  # Glide slope angle; measured from horizon (rad)
     pa: float = None  # Pointing angle (rad)
     fov: float = None  # Field of view (rad)
     vmax: float = None  # Maximum velocity (m/s)

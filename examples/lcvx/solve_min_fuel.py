@@ -19,7 +19,7 @@ def config():
         rho2=13260.0,
         gsa=25 * np.pi / 180,
         pa=30 * np.pi / 180,
-        vmax=None,
+        vmax=200.0,
     )
     N = 55
     tf = 75.0

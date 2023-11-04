@@ -13,7 +13,7 @@ def get_lander(planet: str = "mars"):
     Returns:
         Rocket: Rocket object
     """
-    if str == "mars":
+    if planet == "mars":
         return _mars_lander()
     else:
         raise ValueError(f"Undefined planet: {planet}")
@@ -27,7 +27,8 @@ def _mars_lander():
         Isp=225.0,
         rho1=4972.0,
         rho2=13260.0,
+        gsa=25 * np.pi / 180,
         fov=15 * np.pi / 180,
         pa=30 * np.pi / 180,
-        vmax=800 * 1e3 / 3600,
+        vmax=100.0,  # m/s
     )

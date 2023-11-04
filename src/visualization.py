@@ -7,7 +7,8 @@ plt.rcParams["font.family"] = "Times New Roman"
 
 
 def plot_3sides(
-    t: np.ndarray, X: np.ndarray, U: np.ndarray, gsa: float = None, uskip: int = 1
+    t: np.ndarray, X: np.ndarray, U: np.ndarray, gsa: float = None, uskip: int = 1,
+    fig=None, axs=None
 ):
     """Plot trajectory from three sides
 
@@ -25,7 +26,8 @@ def plot_3sides(
     ux, uy, uz = U.T
 
     # Plot state vector
-    fig, axs = plt.subplots(2, 2, figsize=(12, 8))
+    if fig is None or axs is None:
+        fig, axs = plt.subplots(2, 2, figsize=(12, 8))
     axs[0, 0].plot(x, y, c="k")
     axs[0, 0].grid(True)
     axs[0, 0].set_ylabel("Position y (m)")
@@ -108,8 +110,7 @@ def plot_3sides(
         axs[1, 1].fill_between(
             y_range, np.tan(gsa) * np.abs(y_range - y[-1]), color="gray", alpha=0.5
         )
-
-    plt.show()
+    return fig, axs 
 
 
 def plot_vel(t: np.ndarray, X: np.ndarray, vmax: float = None):
