@@ -62,7 +62,7 @@ def solve(rocket: lc.Rocket, N: int, xf_bounds: tuple, alt: float, tgo: float, t
     data = []
     
     # solve for vx and vz directions
-    lcvx = lc.LCvxControllability(rocket=rocket, N=N, alt0=alt)
+    lcvx = lc.LCvxControllability(rocket=rocket, N=N)
     xc = np.zeros(7)
     prob = lcvx.problem(xf_bounds=xf_bounds, tf=tgo, xc=xc, directional_cstr=[False, False, False, True, True, True, False])
     # solve for the center point of vz

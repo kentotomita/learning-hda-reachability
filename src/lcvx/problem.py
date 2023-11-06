@@ -419,7 +419,7 @@ class LCvxReachability(LCvxProblem):
 class LCvxControllability(LCvxProblem):
     """Controllability problem class; given a bounded terminal state set, compute the feasible initial state set.""" 
 
-    def __init__(self, rocket: Rocket, N: int, alt0: float):
+    def __init__(self, rocket: Rocket, N: int):
         """Landing problem for computing a controllable set.
 
         Args:
@@ -428,53 +428,41 @@ class LCvxControllability(LCvxProblem):
             alt0: Initial altitude.
         """
         super().__init__(rocket, N)
-        self.alt0 = alt0
-
-    def _boundary_cstr(self, vars: Tuple[cp.Variable], xf_bounds: Tuple[np.ndarray]):
-        """Boundary conditions. Terminal states are bounded by definition. Initial states are fixed for altitude.
-        
-        Args:
-            vars: Tuple of cvxpy variables: r, v, m, u, sigma.
-            xf_bounds: Terminal state bounds.
-        """
-        r, v, z, _, _ = vars
-        xf_min, xf_max = xf_bounds
-
-        # Terminal conditions
-        cstr = [r[:, -1] >= xf_min[:3]]  # position
-        cstr.append(r[:, -1] <= xf_max[:3])
-        cstr.append(v[:, -1] >= xf_min[3:6])  # velocity
-        cstr.append(v[:, -1] <= xf_max[3:6])
-        cstr.append(z[-1] >= xf_min[6])  # log(mass)
-        cstr.append(z[-1] <= xf_max[6])
-        cstr.append(
-            z[-1] >= np.log(self.rocket.mdry)
-        )  # final log(mass) >= log(dry mass)
-
-        # Initial conditions
-        cstr.append(r[2, 0] == self.alt0)  # initial altitude is specified
-
-        return cstr
     
     def problem(
         self,
         xf_bounds: Tuple[np.ndarray],
         tf: float,
+        x0_paramed: Union[bool, List[bool]] = [False, False, True, False, False, False, False],
+        c_paramed: Union[bool, List[bool]] = True,
+        directional_cstr: Union[bool, List[bool]] = False,
         xc: np.ndarray = None,
-        directional_cstr: Union[bool, List[bool]] = False
     ) -> cp.Problem:
         """Define the reachability problem.
         Args:
             xf_bounds: Terminal state bounds.
             tf: Final time.
-            xc: Center state from which range is maximized. Shape: (7,) for x, y, z, vx, vy, vz, log(mass).
+            x0_paramed: If True, then the initial state are parameters. Default is True for altitude.
+            c_paramed: If True, then the maximum state direction is a parameter. Default is True.
             directional_cstr: Directional constraints for each state.
+            xc: Center state from which range is maximized. Shape: (7,) for x, y, z, vx, vy, vz, log(mass).
         """
-        
         # Problem parameters
         dt = tf / self.N
         t = np.array([i * dt for i in range(self.N + 1)])
-        c = cp.Parameter(7, name="c")  # maximum state direction
+        # Parameterization for maximum state direction
+        c = list(np.zeros(7))
+        if c_paramed is not False:
+            c_ = cp.Parameter(sum(c_paramed), name="c")
+            j = 0
+            for i in range(7):
+                if c_paramed[i]:
+                    c[i] = c_[j]
+                    j += 1
+
+        # Parameterization for initial state
+        if x0_paramed is not False:
+            x0 = cp.Parameter(sum(x0_paramed), name="x0")
 
         # Problem variables
         X = cp.Variable((7, self.N + 1), name="X")  # state variables
@@ -487,7 +475,7 @@ class LCvxControllability(LCvxProblem):
         cstr = self._lcvx_constraints(
             params=(None, tf, dt, t, None), vars=(r, v, z, u, sigma)
         )
-        cstr += self._boundary_cstr(vars=(r, v, z, u, sigma), xf_bounds=xf_bounds)
+        cstr += self._boundary_cstr(vars=(r, v, z, u, sigma), xf_bounds=xf_bounds, x0_paramed=x0_paramed, x0=x0)
 
         # Problem objective
         if xc is None:
@@ -508,5 +496,49 @@ class LCvxControllability(LCvxProblem):
                 ]
 
         obj = cp.Maximize(cp.sum([c[i] * x0[i] for i in range(7)]))
+        prob = cp.Problem(obj, cstr)
 
-        return cp.Problem(obj, cstr)
+        # If Disciplined Parametrized Programming (DPP), solving it repeatedly for different 
+        # values of the parameters can be much faster than repeatedly solving a new problem.
+        assert prob.is_dpp(), "Problem is not DPP."
+
+        return prob
+
+    def _boundary_cstr(self, vars: Tuple[cp.Variable], xf_bounds: Tuple[np.ndarray], x0_paramed: Union[bool, List[bool]], x0: cp.Parameter=None):
+        """Boundary conditions. Terminal states are bounded by definition. Initial states are fixed for altitude.
+        
+        Args:
+            vars: Tuple of cvxpy variables: r, v, m, u, sigma.
+            xf_bounds: Terminal state bounds.
+            x0_paramed: If True, then the initial state are parameters.
+            x0: Initial state.
+        """
+        r, v, z, _, _ = vars
+
+        # Terminal conditions
+        xf_min, xf_max = xf_bounds
+        cstr = [r[:, -1] >= xf_min[:3]]  # position
+        cstr.append(r[:, -1] <= xf_max[:3])
+        cstr.append(v[:, -1] >= xf_min[3:6])  # velocity
+        cstr.append(v[:, -1] <= xf_max[3:6])
+        cstr.append(z[-1] >= xf_min[6])  # log(mass)
+        cstr.append(z[-1] <= xf_max[6])
+        cstr.append(
+            z[-1] >= np.log(self.rocket.mdry)
+        )  # final log(mass) >= log(dry mass)
+        
+        # Initial conditions
+        if x0_paramed is not None:
+            j = 0
+            for i, paramed in enumerate(x0_paramed):
+                if paramed:
+                    if 0 <= i <= 2:  # position
+                        cstr += [r[i, 0] == x0[j]]
+                    elif 3 <= i <= 5:  # velocity
+                        cstr += [v[i, 0] == x0[j]]
+                    elif i == 6:  # log(mass)
+                        cstr += [z[0] == x0[j]]
+                    else:
+                        raise ValueError(f"Undefined parameter: {i}")
+                    j += 1
+        return cstr
