@@ -27,13 +27,12 @@ def main():
     tgo_min = alt_set / 100.0  # min time to go
     d_tgo = 1.0
     theta_list = np.linspace(0.0, np.pi, 101)
-    n_proc = 16
+    n_proc = 8
 
     # Prepare output directory
     dtstring = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     out_dir = os.path.join('../out/controllable_set/', dtstring)
     os.makedirs(out_dir, exist_ok=True)
-S
     data_header = ['rx', 'ry', 'rz', 'vx', 'vy', 'vz', 'm0', 'tgo', 'mf']
     data = []
 
@@ -72,7 +71,7 @@ def solve(rocket: lc.Rocket, N: int, xf_bounds: tuple, alt: float, tgo: float, t
         c = np.array([0.0, 0.0, 0.0, 0.0, 0.0, z_direction, 0.0])
         lc.set_params(prob, {'c': c})
         data, data_points = _solve(data, lcvx, prob, tgo)
-        if data_points is note None:
+        if data_points is not None:
             vz_bounds.append(data_points[5])
     if len(vz_bounds) == 2:
         xc[5] = np.mean(vz_bounds)
