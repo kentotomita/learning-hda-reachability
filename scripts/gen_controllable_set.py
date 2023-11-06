@@ -5,7 +5,7 @@ import cvxpy as cp
 import sys
 import os
 import multiprocessing as mp
-import itertools
+from itertools import product
 from tqdm import tqdm
 import datetime
 sys.path.append('../')
@@ -22,10 +22,13 @@ def main():
         np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, np.log(1750.0)]),  # Final state vector (m, m, m, m/s, m/s, m/s, kg)
     )
     N = 100
-    alt_set = np.linspace(10, 1500, 100)
-    tgo_max = alt_set / 10.0  # max time to go
-    tgo_min = alt_set / 100.0  # min time to go
-    d_tgo = 1.0
+    tgo_set = np.arange(1.0, 151.0, 1.0)
+    alt_max = 1500.0
+    alt_min = 10.0
+    tgo2alt_max = 100.0  # max velocity; max altitude = tgo * tgo2alt_max
+    tgo2alt_min = 1.0  # min velocity; min altitude = tgo * tgo2alt_min
+    d_alt = 10.0  # granularity of altitude
+    d_mass = 1.0  # granularity of mass
     theta_list = np.linspace(0.0, np.pi, 101)
     n_proc = 8
 
@@ -38,9 +41,11 @@ def main():
 
     # Prepare arguments
     args = []
-    for i, alt in enumerate(alt_set):
-        for tgo in np.arange(tgo_min[i], tgo_max[i] + d_tgo, d_tgo):
-            args.append((lander, N, xf_bounds, alt, tgo, theta_list))
+    for tgo in tgo_set:
+        alt_max = min(alt_max, tgo2alt_max * tgo)
+        alt_min = max(alt_min, tgo2alt_min * tgo)
+        alt_set = np.arange(alt_min, alt_max + d_alt, d_alt)
+        args.append((lander, N, xf_bounds, tgo, alt_set, theta_list, d_mass))
 
     # Solve
     if n_proc == 1:
@@ -57,39 +62,43 @@ def main():
     np.save(os.path.join(out_dir, 'data.npy'), np.array(data))
 
 
-def solve(rocket: lc.Rocket, N: int, xf_bounds: tuple, alt: float, tgo: float, theta_list: np.ndarray):
-    # Initialize
-    data = []
-    
-    # solve for vx and vz directions
+def solve(rocket: lc.Rocket, N: int, xf_bounds: tuple, tgo: float, alt_set: list, theta_list: list, d_mass: float):
+    # solve for mass bounds
+    mass_bounds = np.zeros((len(alt_set), len(theta_list), 2))
     lcvx = lc.LCvxControllability(rocket=rocket, N=N)
-    xc = np.zeros(7)
-    prob = lcvx.problem(xf_bounds=xf_bounds, tf=tgo, xc=xc, directional_cstr=[False, False, False, True, True, True, False])
-    # solve for the center point of vz
-    vz_bounds = []
-    for z_direction in [-1.0, 1.0]:
-        c = np.array([0.0, 0.0, 0.0, 0.0, 0.0, z_direction, 0.0])
+    prob = lcvx.problem(
+        xf_bounds=xf_bounds, 
+        tf=tgo, 
+        x0_paramed=[False, False, True, False, False, False, False],  # altitude varied
+        c_paramed=[False, False, False, True, False, True, True],  # vx, vz, mass for maximization
+        directional_cstr=[False, False, False, True, True, True, False]   # velocity direction constrained
+        )
+    for (i, alt), (j, theta), (k, m_direction) in product(enumerate(alt_set), enumerate(theta_list), enumerate([-1.0, 1.0])):
+        c = np.array([np.sin(theta), -np.cos(theta), m_direction])
         lc.set_params(prob, {'c': c})
-        data, data_points = _solve(data, lcvx, prob, tgo)
+        lc.set_params(prob, {'x0': np.array([alt,])})
+        _, data_points = _solve([], lcvx, prob, tgo)
         if data_points is not None:
-            vz_bounds.append(data_points[5])
-    if len(vz_bounds) == 2:
-        xc[5] = np.mean(vz_bounds)
-        prob = lcvx.problem(xf_bounds=xf_bounds, tf=tgo, xc=xc, directional_cstr=[False, False, False, True, True, True, False])
-    # solve for vx and vz directions
-    for theta in theta_list[1:-1]:
-        c = np.array([0.0, 0.0, 0.0, np.sin(theta), 0.0, -np.cos(theta), 0.0])
-        lc.set_params(prob, {'c': c})
-        data, _ = _solve(data, lcvx, prob, tgo)
+            mass_bounds[i, j, k] = data_points[6]
 
-    # solve for mass
-    lcvx = lc.LCvxControllability(rocket=rocket, N=N, alt0=alt)
-    prob = lcvx.problem(xf_bounds=xf_bounds, tf=tgo, directional_cstr=False)
-    for m_direction in [-1.0, 1.0]:
-        c = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, m_direction])
-        lc.set_params(prob, {'c': c})
-        data, _ = _solve(data, lcvx, prob, tgo)
-
+    # solve for feasible velocity space
+    data = []
+    prob = lcvx.problem(
+        xf_bounds=xf_bounds,
+        tf=tgo,
+        x0_paramed=[False, False, True, False, False, False, True],  # altitude and mass are varied
+        c_paramed=[False, False, False, True, False, True, False],  # vx, vz for maximization
+        directional_cstr=[False, False, False, True, True, True, False]   # velocity direction constrained
+        )
+    for (i, alt), (j, theta) in product(enumerate(alt_set), enumerate(theta_list)):
+        if mass_bounds[i, j, 0] == 0.0 or mass_bounds[i, j, 1] == 0.0:
+            continue
+        mass_list = np.arange(mass_bounds[i, j, 0], mass_bounds[i, j, 1] + d_mass, d_mass)
+        for mass in mass_list:
+            c = np.array([np.sin(theta), -np.cos(theta)])
+            lc.set_params(prob, {'c': c})
+            lc.set_params(prob, {'x0': np.array([alt, np.log(mass)])})
+            data, _ = _solve(data, lcvx, prob, tgo)
     return data
 
 
