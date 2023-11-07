@@ -8,7 +8,6 @@ import multiprocessing as mp
 from itertools import product
 from tqdm import tqdm
 import datetime
-sys.path.append('../')
 import src.lcvx as lc
 from config.landers import get_lander
 
@@ -30,7 +29,7 @@ def main():
     d_alt = 10.0  # granularity of altitude
     d_mass = 1.0  # granularity of mass
     theta_list = np.linspace(0.0, np.pi, 101)
-    n_proc = 8
+    n_proc = 16
 
     # Prepare output directory
     dtstring = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
