@@ -335,33 +335,6 @@ class LCvxReachability(LCvxProblem):
         super().__init__(rocket, N)
         self.maxk = maxk
         self.directional_cstr = directional_cstr
-
-    def _boundary_cstr(self, vars: Tuple[cp.Variable], x0_bounds: Tuple[np.ndarray]):
-        """Boundary conditions. Inital states are bounded by definition. Final states are fixed for altitude and velocity.
-        
-        Args:
-            vars: Tuple of cvxpy variables: r, v, m, u, sigma.
-            x0_bounds: Initial state bounds.
-        """
-        r, v, z, _, _ = vars
-        x0_min, x0_max = x0_bounds
-
-        # Initial conditions
-        cstr = [r[:, 0] >= x0_min[:3]]  # initial position
-        cstr.append(r[:, 0] <= x0_max[:3])
-        cstr.append(v[:, 0] >= x0_min[3:6])  # initial velocity
-        cstr.append(v[:, 0] <= x0_max[3:6])
-        cstr.append(z[0] >= x0_min[6])  # initial log(mass)
-        cstr.append(z[0] <= x0_max[6])
-
-        # Final conditions
-        cstr.append(r[2, -1] == 0)  # target altitude is zero
-        cstr += [v[:, -1] == np.zeros(3)]  # soft landing; v = 0 at final time
-        cstr.append(
-            z[-1] >= np.log(self.rocket.mdry)
-        )  # final log(mass) >= log(dry mass)
-
-        return cstr
     
     def problem(
         self,
@@ -415,6 +388,33 @@ class LCvxReachability(LCvxProblem):
         obj = cp.Maximize(cp.sum([c[i] * xk[i] for i in range(7)]))
 
         return cp.Problem(obj, cstr)
+
+    def _boundary_cstr(self, vars: Tuple[cp.Variable], x0_bounds: Tuple[List]):
+        """Boundary conditions. Inital states are bounded by definition. Final states are fixed for altitude and velocity.
+        
+        Args:
+            vars: Tuple of cvxpy variables: r, v, m, u, sigma.
+            x0_bounds: Initial state bounds.
+        """
+        r, v, z, _, _ = vars
+        x0_min, x0_max = x0_bounds
+
+        # Initial conditions
+        cstr  = [r[i, 0] >= x0_min[i] for i in range(3)]
+        cstr += [r[i, 0] <= x0_max[i] for i in range(3)]
+        cstr += [v[i, 0] >= x0_min[i + 3] for i in range(3)]  # initial velocity
+        cstr += [v[i, 0] <= x0_max[i + 3] for i in range(3)]
+        cstr += [z[0] >= x0_min[6]]
+        cstr += [z[0] <= x0_max[6]]
+
+        # Final conditions
+        cstr.append(r[2, -1] == 0)  # target altitude is zero
+        cstr += [v[:, -1] == np.zeros(3)]  # soft landing; v = 0 at final time
+        cstr.append(
+            z[-1] >= np.log(self.rocket.mdry)
+        )  # final log(mass) >= log(dry mass)
+
+        return cstr
 
 
 class LCvxControllability(LCvxProblem):
