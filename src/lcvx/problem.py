@@ -11,6 +11,7 @@ __all__ = [
     "LCvxMinFuel",
     "LCvxReachability",
     "LCvxControllability",
+    "LcVxControllabilityVxz"
 ]
 
 
@@ -435,6 +436,7 @@ class LCvxControllability(LCvxProblem):
         tf: float,
         x0_paramed: Union[bool, List[bool]] = [False, False, True, False, False, False, False],
         c_paramed: Union[bool, List[bool]] = True,
+        xc_paramed: Union[bool, List[bool]] = False,
         directional_cstr: Union[bool, List[bool]] = False,
         xc: np.ndarray = None,
     ) -> cp.Problem:
@@ -463,6 +465,16 @@ class LCvxControllability(LCvxProblem):
         # Parameterization for initial state
         if x0_paramed is not False:
             x0 = cp.Parameter(sum(x0_paramed), name="x0")
+
+        # Parameterization for center state
+        xc = list(np.zeros(7))
+        if xc_paramed is not False:
+            xc_ = cp.Parameter(sum(xc_paramed), name="xc")
+            j = 0
+            for i in range(7):
+                if xc_paramed[i]:
+                    xc[i] = xc_[j]
+                    j += 1
 
         # Problem variables
         X = cp.Variable((7, self.N + 1), name="X")  # state variables
@@ -535,10 +547,62 @@ class LCvxControllability(LCvxProblem):
                     if 0 <= i <= 2:  # position
                         cstr += [r[i, 0] == x0[j]]
                     elif 3 <= i <= 5:  # velocity
-                        cstr += [v[i, 0] == x0[j]]
+                        cstr += [v[i - 3, 0] == x0[j]]
                     elif i == 6:  # log(mass)
                         cstr += [z[0] == x0[j]]
                     else:
                         raise ValueError(f"Undefined parameter: {i}")
                     j += 1
         return cstr
+
+
+class LcVxControllabilityVxz(LCvxControllability):
+    """Controllability problem class for velocity in x-z plane."""
+
+    def __init__(self, rocket: Rocket, N: int):
+        super().__init__(rocket, N)
+
+    def problem(self, xf_bounds: Tuple[np.ndarray], tf: float):
+        """Define the reachability problem.
+        Args:
+            xf_bounds: Terminal state bounds.
+            tf: Final time.
+        """
+        # Problem parameters
+        dt = tf / self.N
+        t = np.array([i * dt for i in range(self.N + 1)])
+        alt = cp.Parameter(nonneg=True, name="alt")
+        z_mass = cp.Parameter(nonneg=True, name="z_mass")  # log(mass) at the initial time
+        c = cp.Parameter(2, name="c")
+        c_xc_arr = cp.Parameter((2, 2), name="c_xc_arr")  # product of center state and maximum state direction
+
+        # Problem variables# Problem variables
+        X = cp.Variable((7, self.N + 1), name="X")  # state variables
+        U = cp.Variable((4, self.N), name="U")  # control variables
+
+        # Recovered variables
+        r, v, z, u, sigma = self.recover_variables(X, U)
+
+        # Problem constraints
+        cstr = self._lcvx_constraints(
+            params=(None, tf, dt, t, None), vars=(r, v, z, u, sigma)
+        )
+        cstr += self._boundary_cstr(
+            vars=(r, v, z, u, sigma), 
+            xf_bounds=xf_bounds, 
+            x0_paramed=[False, False, True, False, False, False, True], 
+            x0=[alt, z_mass])
+
+        # Problem objective
+        obj = cp.Maximize(c[0] * v[0, 0] - c_xc_arr[0, 0] + c[1] * v[2, 0] - c_xc_arr[1, 1])
+
+        # Directional constraint
+        cstr += [(c[0] * v[2, 0] - c_xc_arr[0, 1]) - (c[1] * v[0, 0] - c_xc_arr[1, 0]) == 0]  # c x (v - vc) = 0
+
+        prob = cp.Problem(obj, cstr)
+
+        # If Disciplined Parametrized Programming (DPP), solving it repeatedly for different 
+        # values of the parameters can be much faster than repeatedly solving a new problem.
+        assert prob.is_dpp(), "Problem is not DPP."
+
+        return prob
