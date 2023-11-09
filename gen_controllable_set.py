@@ -31,7 +31,7 @@ def main():
     theta_list = np.linspace(0.0, np.pi, 51)
     n_proc = 64
 
-    if True:  # debug config
+    if False:  # debug config
         tgo_set = np.arange(1.0, 151.0, 20.0)
         d_alt = 200.0
         d_mass = 20.0

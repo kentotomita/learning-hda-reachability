@@ -11,7 +11,8 @@ __all__ = [
     "LCvxMinFuel",
     "LCvxReachability",
     "LCvxControllability",
-    "LcVxControllabilityVxz"
+    "LcVxControllabilityVxz",
+    "LCvxReachabilityVxz"
 ]
 
 
@@ -323,29 +324,29 @@ class LCvxReachability(LCvxProblem):
     """Reachability problems; given a bounded initial state set, compute the reachable set. 
     The final altitude and the final velocity are fixed at zero."""
 
-    def __init__(self, rocket: Rocket, N: int, maxk: int, directional_cstr: Union[bool, List[bool]] = False):
+    def __init__(self, rocket: Rocket, N: int, directional_cstr: Union[bool, List[bool]] = False):
         """Landing problem for computing a reachable set at a specific step.
 
         Args:
             rocket: Rocket model.
             N: Number of discretization points.
-            maxk: Step at which the maximization is performed.
             directional_cstr: Directional constraints for each state.
         """
         super().__init__(rocket, N)
-        self.maxk = maxk
         self.directional_cstr = directional_cstr
     
     def problem(
         self,
         x0_bounds: Tuple[np.ndarray],
         tf: float,
+        maxk: int,
         xc: np.ndarray = None,
     ) -> cp.Problem:
         """Define the reachability problem.
         Args:
             x0_bounds: Initial state bounds.
             tf: Final time.
+            maxk: Step at which the maximization is performed.
             xc: Center state from which range is maximized. Shape: (7,) for x, y, z, vx, vy, vz, log(mass).
         """
         
@@ -371,9 +372,9 @@ class LCvxReachability(LCvxProblem):
         if xc is None:
             xc = np.zeros(7)
         xk = [
-            r[0, self.maxk], r[1, self.maxk], r[2, self.maxk],
-            v[0, self.maxk], v[1, self.maxk], v[2, self.maxk],
-            z[self.maxk],
+            r[0, maxk], r[1, maxk], r[2, maxk],
+            v[0, maxk], v[1, maxk], v[2, maxk],
+            z[maxk],
         ]
         xk = [xk[i] - xc[i] for i in range(7)]  # state at maximization step relative to the center state
         
@@ -389,7 +390,7 @@ class LCvxReachability(LCvxProblem):
 
         return cp.Problem(obj, cstr)
 
-    def _boundary_cstr(self, vars: Tuple[cp.Variable], x0_bounds: Tuple[List]):
+    def _boundary_cstr(self, vars: Tuple[cp.Variable], x0_bounds: Tuple[List]=None, x0=None):
         """Boundary conditions. Inital states are bounded by definition. Final states are fixed for altitude and velocity.
         
         Args:
@@ -397,15 +398,22 @@ class LCvxReachability(LCvxProblem):
             x0_bounds: Initial state bounds.
         """
         r, v, z, _, _ = vars
-        x0_min, x0_max = x0_bounds
 
         # Initial conditions
-        cstr  = [r[i, 0] >= x0_min[i] for i in range(3)]
-        cstr += [r[i, 0] <= x0_max[i] for i in range(3)]
-        cstr += [v[i, 0] >= x0_min[i + 3] for i in range(3)]  # initial velocity
-        cstr += [v[i, 0] <= x0_max[i + 3] for i in range(3)]
-        cstr += [z[0] >= x0_min[6]]
-        cstr += [z[0] <= x0_max[6]]
+        if x0_bounds is not None:
+            x0_min, x0_max = x0_bounds
+            cstr  = [r[i, 0] >= x0_min[i] for i in range(3)]
+            cstr += [r[i, 0] <= x0_max[i] for i in range(3)]
+            cstr += [v[i, 0] >= x0_min[i + 3] for i in range(3)]
+            cstr += [v[i, 0] <= x0_max[i + 3] for i in range(3)]
+            cstr += [z[0] >= x0_min[6]]
+            cstr += [z[0] <= x0_max[6]]
+        elif x0 is not None:
+            cstr  = [r[i, 0] == x0[i] for i in range(3)]
+            cstr += [v[i, 0] == x0[i + 3] for i in range(3)]
+            cstr += [z[0] == x0[6]]
+        else:
+            raise ValueError("Initial state must be provided.")
 
         # Final conditions
         cstr.append(r[2, -1] == 0)  # target altitude is zero
@@ -415,6 +423,59 @@ class LCvxReachability(LCvxProblem):
         )  # final log(mass) >= log(dry mass)
 
         return cstr
+    
+
+class LCvxReachabilityVxz(LCvxReachability):
+    """Reachability problem class for range in x-z plane."""
+
+    def __init__(self, rocket: Rocket, N: int):
+        super().__init__(rocket, N)
+
+    def problem(self, tf: float):
+        """Define the reachability problem.
+        Args:
+            x0_bounds: Initial state bounds.
+            tf: Final time.
+        """
+        # Problem parameters
+        dt = tf / self.N
+        t = np.array([i * dt for i in range(self.N + 1)])
+        alt = cp.Parameter(nonneg=True, name="alt")
+        vx = cp.Parameter(name="vx")
+        vz = cp.Parameter(name="vz")
+        z_mass = cp.Parameter(nonneg=True, name="z_mass")  # log(mass) at the initial time
+        c = cp.Parameter(2, name="c")  # maximum range direction in x-z plane
+        c_xc_arr = cp.Parameter((2, 2), name="c_xc_arr")  # product of center state and maximum state direction
+
+        # Problem variables
+        X = cp.Variable((7, self.N + 1), name="X")
+        U = cp.Variable((4, self.N), name="U")
+
+        # Recovered variables
+        r, v, z, u, sigma = self.recover_variables(X, U)
+
+        # Problem constraints
+        x0 = [0.0, 0.0, alt, vx, 0.0, vz, z_mass]
+        cstr = self._lcvx_constraints(
+            params=(None, tf, dt, t, None), vars=(r, v, z, u, sigma)
+        )
+        cstr += self._boundary_cstr(vars=(r, v, z, u, sigma), x0=x0)
+
+        # Problem objective
+        obj = cp.Maximize(c[0] * r[0, 0] - c_xc_arr[0, 0] + c[1] * r[1, 0] - c_xc_arr[1, 1])
+
+        # Directional constraint
+        cstr += [(c[0] * r[1, 0] - c_xc_arr[0, 1]) - (c[1] * r[0, 0] - c_xc_arr[1, 0]) == 0]  # c x (v - vc) = 0
+
+        prob = cp.Problem(obj, cstr)
+
+        # If Disciplined Parametrized Programming (DPP), solving it repeatedly for different 
+        # values of the parameters can be much faster than repeatedly solving a new problem.
+        assert prob.is_dpp(), "Problem is not DPP."
+
+        return prob
+
+
 
 
 class LCvxControllability(LCvxProblem):
