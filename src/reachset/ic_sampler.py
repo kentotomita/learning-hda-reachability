@@ -1,80 +1,120 @@
-"""Utility functions for sampling initial conditions for reachability analysis."""
-
+"""Utility functions for sampling initial conditions from controllable set."""
 import numpy as np
-from numba import njit
+import numba
+from scipy.optimize import linprog
+import time
 
 
-@njit
-def convert_to_x0(sample: np.ndarray):
-    """Convert random sample from unit cube to x0
+@numba.njit
+def inside_hull(point, simplex_eqs):
+    """Check if a point is inside a convex hull defined by a set of linear equations.
 
     Args:
-        sample (np.ndarray): random sample from unit cube, shape (n, 5)
+        point (np.ndarray): Point to check. (n_dim,)
+        simplex_eqs (list): List of linear equations defining the convex hull. (n_points, n_dim).  Ax + b <= 0.
+
+    """
+    for eq in simplex_eqs:
+        if not (np.dot(eq[:-1], point) + eq[-1] <= 0):
+            return False
+    return True
+
+
+def random_sampling_in_hull(simplex_eqs, bounds, n_samples, seed=0):
+    """Sample random points in a convex hull; a hull is defined by a set of linear equations.
+
+    Args:
+        simplex_eqs (list): List of linear equations defining the convex hull. (n_points, n_dim).  Ax + b <= 0.
+        bounds (tuple): Bounds of the convex hull. (lb, ub)
+        n_samples (int): Number of samples to generate.
+    """
+    lb, ub = bounds
+    samples = np.empty((n_samples, len(lb)))
+    rng = np.random.RandomState(seed=seed)
+    i = 0
+    while i < n_samples:
+        #random_point = lb + (ub - lb) * np.random.random(size=lb.shape)
+        random_point = lb + (ub - lb) * rng.random(size=lb.shape)
+        if inside_hull(random_point, simplex_eqs):
+            samples[i] = random_point
+            i += 1
+
+    return samples
+
+
+def structured_sample_points_in_convex_hull(hull, n_per_dim, points, buffer=0.1):
+    """Samples points within a convex hull by partitioning the hull for each dimension.
+    The subsequent partitions are made within the bounds of the subspace defined by the previous partitions.
+
+    Args:
+        hull (scipy.spatial.ConvexHull): Convex hull.
+        n_per_dim (int): Number of partitions per dimension.
+        points (np.ndarray): Points defining the convex hull. (n_points, n_dim)
 
     Returns:
-        x0_arr (np.ndarray): initial state, shape (n, 7)
-        tgo (np.ndarray): time to go, shape (n, )
+        np.ndarray: Sampled points within the convex hull.
     """
-    r_alt, r_tgo, r_vx, r_vz, r_mass = sample.T
+    simplex_eqs = hull.equations
+    n_dim = points.shape[1]
 
-    alt_min, alt_max = 100.0, 1500.0
-    alt = alt_min + (alt_max - alt_min) * r_alt
+    # Compute the bounds for each dimension
+    def get_bounds(dim, fixed_values):
+        c = np.zeros(n_dim)
+        c[dim] = 1  # Objective function to maximize/minimize the current dimension
 
-    tgo_min, tgo_max = tgo_bound(alt)
-    tgo = tgo_min + (tgo_max - tgo_min) * r_tgo
-    tgo = tgo // 1  # round to integer
+        A_ub = simplex_eqs[:, :-1]
+        b_ub = -simplex_eqs[:, -1]
 
-    vx_min, vx_max = vx_bound(alt)
-    vx = vx_min + (vx_max - vx_min) * r_vx
+        # Setting equality constraints for fixed dimensions
+        A_eq = np.zeros((len(fixed_values), n_dim))
+        b_eq = np.zeros(len(fixed_values))
+        for idx, (d, val) in enumerate(fixed_values.items()):
+            A_eq[idx, d] = 1
+            b_eq[idx] = val
 
-    vz_min, vz_max = vz_bound(alt)
-    vz = vz_min + (vz_max - vz_min) * r_vz
+        # Linear programming to find min and max for current dimension
+        res_min = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=(None, None))
+        res_max = linprog(-c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=(None, None))
 
-    mass_min, mass_max = mass_bound(alt)
-    mass = mass_min + (mass_max - mass_min) * r_mass
-    z = np.log(mass)
+        if res_min.success and res_max.success:
+            return res_min.fun, -res_max.fun
+        else:
+            return None, None
 
-    zeros = np.zeros_like(alt)
+    def add_buffer(bounds, buffer):
+        lb, ub = bounds
+        scale = (ub - lb) * buffer
+        lb += scale / 2
+        ub -= scale / 2
+        return lb, ub
 
-    x0_arr = np.vstack((zeros, zeros, alt, vx, zeros, vz, z)).T
+    # Sampling points within the convex hull
+    samples = []
+    start = time.time()
+    for dim in range(n_dim):
+        if dim == 0:
+            min_val, max_val = np.min(points[:, dim]), np.max(points[:, dim])
+            min_val, max_val = add_buffer((min_val, max_val), buffer)
+            sample_points = np.linspace(min_val, max_val, n_per_dim)
+            samples = [[val] for val in sample_points]
+        else:
+            new_samples = []
+            for fixed_values in samples:
+                fixed_dict = {i: fixed_values[i] for i in range(len(fixed_values))}
+                min_val, max_val = get_bounds(dim, fixed_dict)
+                min_val, max_val = add_buffer((min_val, max_val), buffer)
+                if min_val is not None and max_val is not None:
+                    for point in np.linspace(min_val, max_val, n_per_dim):
+                        new_samples.append(fixed_values + [point])
 
-    return x0_arr, tgo
+                # len(samples)/n_per_dim ** n_dim is the current progress
+                elapsed = time.time() - start
+                n_samples = max(len(samples), len(new_samples))
+                t_per_sample = elapsed / n_samples
+                t_remaining = (n_per_dim ** n_dim - n_samples) * t_per_sample
+                t_total = elapsed + t_remaining
+                print(f"{n_samples / n_per_dim ** n_dim * 100:.2f}% completed. {t_remaining/60:.2f}m remaining ({t_total/60:.2f}m)", end="\r")
 
+            samples = new_samples
 
-@njit
-def vz_bound(alt):
-    ymax = 10 - 10 / 1500 * alt
-    ymin = -20 + (-50 - (-20)) / 250 * alt
-    mask1 = alt > 250
-    ymin[mask1] = -50 + (-65 - (-50)) / (500 - 250) * (alt[mask1] - 250)
-    mask2 = alt > 500
-    ymin[mask2] = -65 + (-35 - (-65)) / (1500 - 500) * (alt[mask2] - 500)
-    return ymin, ymax
-
-
-@njit
-def vx_bound(alt):
-    n = len(alt)
-    ymin = np.zeros(n)
-    ymax = 15 + (90 - 15) / 450 * alt
-    mask = alt > 450
-    ymax[mask] = 90
-    mask = alt > 900
-    ymax[mask] = 90 + (60 - 90) / (1500 - 900) * (alt[mask] - 900)
-    return ymin, ymax
-
-
-@njit
-def mass_bound(alt):
-    ymax = 1750 + (1825 - 1750) / 1500 * alt
-    ymin = 1600 + (1750 - 1600) * alt / 1300
-    mask = alt <= 300
-    ymax[mask] = 1650 + (1750 - 1650) / 300 * alt[mask]
-    return ymin, ymax
-
-
-@njit
-def tgo_bound(alt):
-    ymax = 30 + (60 - 30) / 1500 * alt
-    ymin = 50 / 1500 * alt
-    return ymin, ymax
+    return np.array(samples)

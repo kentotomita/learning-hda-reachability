@@ -1,102 +1,85 @@
 """Generate a set of feasible initial conditions"""
-import numpy as np
-import sys
-import multiprocessing as mp
-from tqdm import tqdm
-import warnings
-import time
 import argparse
-from datetime import datetime
+import multiprocessing as mp
+import numpy as np
 import os
-
+import datetime
+import time
+from scipy.spatial import ConvexHull
+import sys
 sys.path.append('../')
-from rahao.reachset import convert_to_x0, save_icset, get_ic_list
-from config import slr_config
-
-debug = False
-np.set_printoptions(precision=1)
-warnings.filterwarnings("ignore", category=UserWarning)
-
-def main(n_sample, n_proc, n_per_process, outdir, debug=False):
-    """Main function to find feasible initial conditions.
-    
-    Args:
-        n_sample (int): number of random samples
-        n_proc (int): number of processes
-        n_per_process (int): number of samples per process
-    """
-    rocket, N = slr_config()
-    
-    # generate random samples
-    sample = np.random.rand(n_sample, 5)
-    x0_arr, tgo = convert_to_x0(sample)
-
-    # sort by tgo
-    idx = np.argsort(tgo)
-    x0_arr = x0_arr[idx]
-    tgo = tgo[idx]
-
-    # ----------------- solve problem -----------------
-    icset = []
-
-    if n_proc > 1:
-        # prepare parameters
-        params = []
-        for i in range(0, n_sample, n_per_process):
-            if i + n_per_process < n_sample:
-                params.append((rocket, N, x0_arr[i:i+n_per_process], tgo[i:i+n_per_process], debug))
-            else:
-                params.append((rocket, N, x0_arr[i:], tgo[i:], debug))
-
-        # solve 
-        with mp.Pool(processes=n_proc) as p:
-            icset = []
-            for out in tqdm(p.starmap(get_ic_list, params), total=len(params)):
-                icset.extend(out)
-
-    else:
-        icset.extend(get_ic_list(rocket, N, x0_arr, tgo, debug))
-
-    if len(icset) == 0:
-        raise ValueError('No feasible initial condition found.')
-
-    # ----------------- post processing -----------------
-    now = datetime.now()
-    dt_string = now.strftime("%Y%m%d_%H%M%S")
-    outdir = outdir + '/' + dt_string
-    os.makedirs(outdir, exist_ok=True)
-    icset = save_icset(rocket, N, icset, outdir=outdir, fname='icset.json', return_data=True)
-
-    # calc sampling efficiency
-    rfz_arr = np.array(icset['data'])[:, -1]
-    n_data = len(rfz_arr)
-    n_feasible = n_sample - np.isnan(rfz_arr).sum()
-
-    print('Number of generate data: ', n_data)
-    print('Number of feasible initial conditions: ', n_feasible)
+from src.reachset.ic_sampler import random_sampling_in_hull, structured_sample_points_in_convex_hull
 
 
-if __name__ == '__main__':
-    print('Generate a set of feasible initial conditions.')
+def main():
+    start = time.time()
 
     # read command line inputs
     parser  = argparse.ArgumentParser()
-    parser.add_argument('--n_sample', type=int, default=int(1e7))  
-    parser.add_argument('--n_proc', type=int, default=28)
-    parser.add_argument('--n_per_proc', type=int, default=1000)
-    parser.add_argument('--outdir', type=str, default='out')
-
+    parser.add_argument('--n_random', type=int, default=int(1e4))
+    parser.add_argument('--n_per_dim', type=int, default=5)
+    parser.add_argument('--n_proc', type=int, default=8)
     args = parser.parse_args()
 
-    n_sample = args.n_sample
-    n_proc = args.n_proc
-    n_per_proc = min(args.n_per_proc, int(n_sample/n_proc))
-    outdir = args.outdir
+    # load controllable set
+    data = np.load('saved/controllable_set/data.npy')
+    
+    # Create convex hull
+    print('Creating convex hull...')
+    indices = [2, 3, 5, 6, 7]
+    data_5d = data[:, indices]
+    data_bounds = (np.min(data_5d, axis=0), np.max(data_5d, axis=0))
+    data_normalized = (data_5d - data_bounds[0]) / (data_bounds[1] - data_bounds[0])
+    hull_5d = ConvexHull(data_normalized, qhull_options='Q12')
 
+    # Random sampling
+    print('Random sampling...')
+    if args.n_proc == 1:
+        random_samples = random_sampling_in_hull(np.ascontiguousarray(hull_5d.equations), (np.zeros(5), np.ones(5)), args.n_random)
+    else:
+        params = []
+        for i in range(args.n_proc):
+            params.append((np.ascontiguousarray(hull_5d.equations), (np.zeros(5), np.ones(5)), args.n_random, i))
+        with mp.Pool(args.n_proc) as p:
+            out = p.starmap(random_sampling_in_hull, params)
+            random_samples = np.vstack(out)
+
+    # denormalize
+    random_samples = random_samples * (data_bounds[1] - data_bounds[0]) + data_bounds[0]
+
+    # structured sampling
+    print('Structured sampling...')
+    if args.n_proc == 1:
+        structured_samples = structured_sample_points_in_convex_hull(hull_5d, args.n_per_dim, hull_5d.points)
+    else:
+        params = []
+        buffer_list = np.linspace(0.05, 0.3, args.n_proc)
+        for i in range(args.n_proc):
+            params.append((hull_5d, args.n_per_dim, hull_5d.points, buffer_list[i]))
+        with mp.Pool(args.n_proc) as pool:
+            out = pool.starmap(structured_sample_points_in_convex_hull, params)
+            structured_samples = np.vstack(out)
+
+    # denormalize
+    structured_samples = structured_samples * (data_bounds[1] - data_bounds[0]) + data_bounds[0]
+
+    # save
+    print('Saving...')
+    dtstring = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    out_dir = os.path.join('out/ic_set/', dtstring)
+    os.makedirs(out_dir, exist_ok=True)
+    np.save(os.path.join(out_dir, 'random_samples.npy'), random_samples)
+    np.save(os.path.join(out_dir, 'structured_samples.npy'), structured_samples)
+
+    # save mata data; shapes of generated samples
+    with open(os.path.join(out_dir, 'meta.txt'), 'w') as f:
+        f.write('random_samples: {}\n'.format(random_samples.shape))
+        f.write('structured_samples: {}\n'.format(structured_samples.shape))
+        f.write('time: {}\n min'.format((time.time() - start)/60))
+
+
+if __name__ == '__main__':
     # measure time
     start = time.time()
-    main(n_sample, n_proc, n_per_proc, outdir)
+    main()
     print("--- %.3f minutes ---" % ((time.time() - start)/60))
-
-
-

@@ -56,6 +56,11 @@ def main(n_proc: int=1):
             for out in tqdm(p.starmap(solve, args), total=len(args)):
                 data.extend(out)
 
+    # Post-processing
+    data = np.array(data)
+    data = data[(data[:, 3] >= 0)]  # Remove negative vx
+    data = data[(data[:, 6] <= lander.mwet)]  # Remove over-sized initial mass
+
     # Save data
     # save header and data
     data_header = ['rx', 'ry', 'rz', 'vx', 'vy', 'vz', 'm0', 'tgo', 'mf']

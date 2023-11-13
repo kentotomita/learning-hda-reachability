@@ -7,7 +7,6 @@
 *.pdf
 *.txt
 out/
-saved/
 
 # tensorboard
 tensorboard/
