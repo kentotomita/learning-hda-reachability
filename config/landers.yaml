@@ -1,0 +1,15 @@
+#----------------------------------------------
+# Lander parameters
+#----------------------------------------------
+
+Mars:
+  g: 3.7114  # m/s^2
+  mdry: 1505.0  # kg
+  mwet: 1905.0  # kg
+  isp: 225.0  # s
+  rho1: 4972.0  # max thrust (N)
+  rho2: 13260.0  # min thrust (N)
+  gsa: 0.4363323129985824  # glide slope angle (rad) = 25 deg
+  fov: 0.2617993877991494  # field of view (rad) = 15 deg
+  pa: 0.5235987755982988   # pointing angle (rad) = 30 deg
+  vmax: 100.0  # m/s

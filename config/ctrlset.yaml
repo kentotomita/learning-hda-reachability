@@ -1,0 +1,19 @@
+#----------------------------------------------
+# Controllable set generation parameters
+#----------------------------------------------
+
+Mars:
+  xf_max: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.4673710669175595]  # [x, y, z, vx, vy, vz, m]
+  xf_min: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.316548177182976]  # [x, y, z, vx, vy, vz, m]
+  N: 100  # Discretization of the controllable set problem
+  alt_max: 1500.0  # Maximum altitude
+  alt_min: 10.0  # Minimum altitude
+  tgo2alt_max: 100.0  # max velocity; max altitude = tgo * tgo2alt_max
+  tgo2alt_min: 1.0  # min velocity; min altitude = tgo * tgo2alt_min
+  tgo_max: 150.0  # max time to go
+  tgo_min: 1.0  # min time to go
+  n_tgo: 20  # number of discretization points for tgo
+  d_alt: 200.0  # altitude discretization (m)
+  d_mass: 20.0  # mass discretization (kg)
+  n_theta: 11  # number of discretization points for theta
+

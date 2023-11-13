@@ -12,7 +12,7 @@ __all__ = [
     "LCvxReachability",
     "LCvxControllability",
     "LcVxControllabilityVxz",
-    "LCvxReachabilityVxz"
+    "LCvxReachabilityRxy"
 ]
 
 
@@ -425,7 +425,7 @@ class LCvxReachability(LCvxProblem):
         return cstr
     
 
-class LCvxReachabilityVxz(LCvxReachability):
+class LCvxReachabilityRxy(LCvxReachability):
     """Reachability problem class for range in x-z plane."""
 
     def __init__(self, rocket: Rocket, N: int):
@@ -462,10 +462,10 @@ class LCvxReachabilityVxz(LCvxReachability):
         cstr += self._boundary_cstr(vars=(r, v, z, u, sigma), x0=x0)
 
         # Problem objective
-        obj = cp.Maximize(c[0] * r[0, 0] - c_xc_arr[0, 0] + c[1] * r[1, 0] - c_xc_arr[1, 1])
+        obj = cp.Maximize(c[0] * r[0, -1] - c_xc_arr[0, 0] + c[1] * r[1, -1] - c_xc_arr[1, 1])
 
         # Directional constraint
-        cstr += [(c[0] * r[1, 0] - c_xc_arr[0, 1]) - (c[1] * r[0, 0] - c_xc_arr[1, 0]) == 0]  # c x (v - vc) = 0
+        cstr += [(c[0] * r[1, -1] - c_xc_arr[0, 1]) - (c[1] * r[0, -1] - c_xc_arr[1, 0]) == 0]  # c x (v - vc) = 0
 
         prob = cp.Problem(obj, cstr)
 
@@ -474,8 +474,6 @@ class LCvxReachabilityVxz(LCvxReachability):
         assert prob.is_dpp(), "Problem is not DPP."
 
         return prob
-
-
 
 
 class LCvxControllability(LCvxProblem):

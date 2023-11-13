@@ -1,8 +1,9 @@
 """Generate controllable set; possible initial states given the terminal state set"""
-
+import yaml
+import argparse
+import pickle
 import numpy as np
 import cvxpy as cp
-import sys
 import os
 import multiprocessing as mp
 from itertools import product
@@ -12,47 +13,40 @@ import src.lcvx as lc
 from config.landers import get_lander
 
 
-def main():
-    # Simulation parameters
-    lander = get_lander(planet='mars')
+def main(n_proc: int=1):
+    # Parameters
+    planet = 'Mars'
+    lander = get_lander(planet=planet)
     lander.gsa = (np.pi - lander.fov) / 2  # set glide-slope angle to be FOV/2
-    xf_bounds = (
-        np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, np.log(lander.mdry)]), # Final state vector (m, m, m, m/s, m/s, m/s, kg)
-        np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, np.log(1750.0)]),  # Final state vector (m, m, m, m/s, m/s, m/s, kg)
-    )
-    N = 100
-    alt_max = 1500.0
-    alt_min = 10.0
-    tgo2alt_max = 100.0  # max velocity; max altitude = tgo * tgo2alt_max
-    tgo2alt_min = 1.0  # min velocity; min altitude = tgo * tgo2alt_min
-    tgo_set = np.arange(1.0, 151.0, 1.0)
-    d_alt = 20.0  # granularity of altitude
-    d_mass = 5.0  # granularity of mass
-    theta_list = np.linspace(0.0, np.pi, 51)
-    n_proc = 64
-
-    if False:  # debug config
-        tgo_set = np.arange(1.0, 151.0, 20.0)
-        d_alt = 200.0
-        d_mass = 20.0
-        theta_list = np.linspace(0.0, np.pi, 11)
-        n_proc = 1
+    
+    with open("config/ctrlset.yaml", "r") as f:
+        ctrlset_data = yaml.safe_load(f)
+    config = ctrlset_data[planet]
 
     # Prepare output directory
     dtstring = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     out_dir = os.path.join('out/controllable_set/', dtstring)
     os.makedirs(out_dir, exist_ok=True)
-    data_header = ['rx', 'ry', 'rz', 'vx', 'vy', 'vz', 'm0', 'tgo', 'mf']
-    data = []
+
+    # Save config
+    with open(os.path.join(out_dir, 'config.yaml'), 'w') as f:
+        yaml.dump(ctrlset_data, f)
+    # pickle rocket object
+    with open(os.path.join(out_dir, 'lander.pkl'), 'wb') as f:
+        pickle.dump(lander, f)
 
     # Prepare arguments
+    xf_bounds = (config['xf_min'], config['xf_max'])
+    tgo_set = np.linspace(config['tgo_min'], config['tgo_max'], config['n_tgo'])
+    theta_list = np.linspace(0.0, np.pi, config['n_theta'])  # angle of velocity vector; 0.0 = vertiargs = []
     args = []
     for tgo in tgo_set:
-        alt_max_ = min(alt_max, tgo2alt_max * tgo)
-        alt_min_ = max(alt_min, tgo2alt_min * tgo)
-        alt_set = np.arange(alt_min_, alt_max_ + d_alt, d_alt)
-        args.append((lander, N, xf_bounds, tgo, alt_set, theta_list, d_mass))
+        alt_max_ = min(config['alt_max'], config['tgo2alt_max'] * tgo)
+        alt_min_ = max(config['alt_min'], config['tgo2alt_min'] * tgo)
+        alt_set = np.arange(alt_min_, alt_max_ + config['d_alt'], config['d_alt'])
+        args.append((lander, config['N'], xf_bounds, tgo, alt_set, theta_list, config['d_mass']))
 
+    data = []
     # Solve
     if n_proc == 1:
         for arg in tqdm(args):
@@ -64,12 +58,27 @@ def main():
 
     # Save data
     # save header and data
+    data_header = ['rx', 'ry', 'rz', 'vx', 'vy', 'vz', 'm0', 'tgo', 'mf']
     np.savetxt(os.path.join(out_dir, 'data_header.txt'), data_header, fmt='%s')
     np.save(os.path.join(out_dir, 'data.npy'), np.array(data))
 
 
 def solve(rocket: lc.Rocket, N: int, xf_bounds: tuple, tgo: float, alt_set: list, theta_list: list, d_mass: float):
+    """Solve for controllable set for given parameters.
     
+    Args:
+        rocket (lc.Rocket): Rocket object
+        N (int): number of discretization
+        xf_bounds (tuple): bounds for terminal state
+        tgo (float): time to go
+        alt_set (list): list of altitude
+        theta_list (list): list of theta
+        d_mass (float): mass discretization
+
+    Returns:
+        list: list of data points; each data point is a list of [rx, ry, rz, vx, vy, vz, m0, tgo, mf]
+    """
+
     # solve for mass bounds and feasible state space
     state_bounds = np.zeros((len(alt_set), 2, 3))  # (alt, min/max, (mass, vx, vz))
     lcvx = lc.LCvxControllability(rocket=rocket, N=N)
@@ -118,11 +127,11 @@ def solve(rocket: lc.Rocket, N: int, xf_bounds: tuple, tgo: float, alt_set: list
                                          [c[0] * vx_center, c[0] * vz_center],
                                          [c[1] * vx_center, c[1] * vz_center]])})
                 data, _ = _solve(data, lcvx, prob, tgo)
-    
     return data
 
 
 def _solve(data, lcvx, prob, tgo):
+    """Solve the problem and return data and data point."""
     try:
         prob.solve(solver=cp.ECOS, verbose=False)
     except cp.SolverError:
@@ -141,7 +150,11 @@ def _solve(data, lcvx, prob, tgo):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Process some integers.")
+    parser.add_argument('--processors', type=int, default=1, help='an integer for the number of processors')
+    args = parser.parse_args()
+
     # measure execution time
     start = datetime.datetime.now()
-    main()
+    main(n_proc=args.processors)
     print(f'Execution time (min): {(datetime.datetime.now() - start).total_seconds() / 60.0}')

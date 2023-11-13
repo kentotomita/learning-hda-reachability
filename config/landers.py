@@ -1,34 +1,35 @@
 """Lander configurations for each planet."""
 import numpy as np
+import yaml
 import sys
 sys.path.append("../")
 
 from src.lcvx import Rocket
 
 
-def get_lander(planet: str = "mars"):
+def get_lander(planet: str = "Mars"):
     """Return Rocket object for the given planet.
     Args:
         planet (str): planet name
     Returns:
         Rocket: Rocket object
     """
-    if planet == "mars":
-        return _mars_lander()
+    with open("config/landers.yaml", "r") as f:
+        lander_data = yaml.safe_load(f)
+
+    if planet in lander_data:
+        data = lander_data[planet]
+        return Rocket(
+            g_=data['g'],
+            mdry=data['mdry'],
+            mwet=data['mwet'],
+            Isp=data['isp'],
+            rho1=data['rho1'],
+            rho2=data['rho2'],
+            gsa=data['gsa'],
+            fov=data['fov'],
+            pa=data['pa'],
+            vmax=data['vmax']
+        )
     else:
         raise ValueError(f"Undefined planet: {planet}")
-
-
-def _mars_lander():
-    return Rocket(
-        g_=3.7114,
-        mdry=1505.0,
-        mwet=1905.0,
-        Isp=225.0,
-        rho1=4972.0,
-        rho2=13260.0,
-        gsa=25 * np.pi / 180,
-        fov=15 * np.pi / 180,
-        pa=30 * np.pi / 180,
-        vmax=100.0,  # m/s
-    )
