@@ -52,6 +52,13 @@ def main():
     with open(os.path.join(out_dir, 'data_header.txt'), 'w') as f:
         f.write('\n'.join(data_header))
 
+    # save meta data; command line inputs and time elapsed
+    with open(os.path.join(out_dir, 'meta.txt'), 'w') as f:
+        f.write('n_proc: {}\n'.format(args.n_proc))
+        f.write('tgo_round: {}\n'.format(args.tgo_round))
+        f.write('n_datamax: {}\n'.format(args.n_datamax))
+        f.write('time_elapsed: {:.2f} m\n'.format((time.time() - start) / 60))
+
     print('Total time: {:.2f} m'.format((time.time() - start) / 60))
 
 
