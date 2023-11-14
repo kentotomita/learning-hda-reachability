@@ -1,4 +1,4 @@
-"""Generate a set of feasible initial conditions"""
+"""Generate initial conditions by sampling points from the controllable set."""
 import argparse
 import multiprocessing as mp
 import numpy as np
@@ -66,7 +66,7 @@ def main():
     # save
     print('Saving...')
     dtstring = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    out_dir = os.path.join('out/ic_set/', dtstring)
+    out_dir = os.path.join('saved/controllable_set/ic_set/', dtstring)
     os.makedirs(out_dir, exist_ok=True)
     np.save(os.path.join(out_dir, 'random_samples.npy'), random_samples)
     np.save(os.path.join(out_dir, 'structured_samples.npy'), structured_samples)

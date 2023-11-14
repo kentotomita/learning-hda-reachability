@@ -428,8 +428,9 @@ class LCvxReachability(LCvxProblem):
 class LCvxReachabilityRxy(LCvxReachability):
     """Reachability problem class for range in x-z plane."""
 
-    def __init__(self, rocket: Rocket, N: int):
+    def __init__(self, rocket: Rocket, N: int, directional_cstr: bool = True):
         super().__init__(rocket, N)
+        self.directional_cstr = directional_cstr
 
     def problem(self, tf: float):
         """Define the reachability problem.
@@ -465,7 +466,8 @@ class LCvxReachabilityRxy(LCvxReachability):
         obj = cp.Maximize(c[0] * r[0, -1] - c_xc_arr[0, 0] + c[1] * r[1, -1] - c_xc_arr[1, 1])
 
         # Directional constraint
-        cstr += [(c[0] * r[1, -1] - c_xc_arr[0, 1]) - (c[1] * r[0, -1] - c_xc_arr[1, 0]) == 0]  # c x (v - vc) = 0
+        if self.directional_cstr:
+            cstr += [(c[0] * r[1, -1] - c_xc_arr[0, 1]) - (c[1] * r[0, -1] - c_xc_arr[1, 0]) == 0]  # c x (v - vc) = 0
 
         prob = cp.Problem(obj, cstr)
 
