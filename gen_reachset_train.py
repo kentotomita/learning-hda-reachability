@@ -1,4 +1,4 @@
-"""Generate reachable set data for training; only a few representative points are computed."""
+"""Generate reachable set data for training; only a few representative points of the reachable set boundary are computed."""
 import cvxpy as cp
 import argparse
 import multiprocessing as mp
