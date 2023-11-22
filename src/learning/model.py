@@ -82,13 +82,12 @@ class MLP(nn.Module):
 
 
 class NeuralReach(MLP):
-    def __init__(self):
+    def __init__(self, hidden_layers=[32, 64, 32]):
         input_dim = 5  # alt, vx, vz, z, tgo
-        output_dim = 7  # feasible, xmin, xmax, alpha, yp, a1, a2
-        hidden_layers = [32, 64, 32]
+        output_dim = 4  # xmin, xmax, ymax, x-ymax
         activation_fn = nn.ReLU()
         output_activation = nn.Sigmoid()
-        dropout_rate = 0.5
+        dropout_rate = 0.0
         use_double_precision = True
         super(NeuralReach, self).__init__(
             input_dim,
