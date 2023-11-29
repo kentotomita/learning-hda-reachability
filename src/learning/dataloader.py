@@ -48,3 +48,39 @@ class ReachsetDataset(Dataset):
         reach_ = torch.tensor(reach_, dtype=torch.float64)
 
         return data, ic_, reach_
+
+
+class FeasibilityDataset(Dataset):
+    def __init__(self, reachset: np.ndarray):
+        self.reachset = reachset
+
+    def __len__(self):
+        return len(self.reachset)
+
+    def __getitem__(self, idx):
+        """Get a single data point from the dataset.
+
+        Returns:
+            data (torch.tensor): original reachset data point
+            ic_ (torch.tensor): transformed initial condition
+            feasibility (torch.tensor): feasibility
+        """
+
+        data = self.reachset[idx, :]
+
+        # unpack data
+        alt, vx, vz, m, tgo = data[:5]
+        z = np.log(m)
+        feasibility = data[5]
+
+        # --------------------
+        # Process Initial Condition (IC) = Input
+        # --------------------
+        alt_, vx_, vz_, z_, tgo_ = transform_ic(alt, vx, vz, z, tgo)
+        ic_ = np.array([alt_, vx_, vz_, z_, tgo_])
+
+        # convert to torch tensor
+        ic_ = torch.tensor(ic_, dtype=torch.float64)
+        feasibility = torch.tensor(feasibility, dtype=torch.float64)
+
+        return data, ic_, feasibility
