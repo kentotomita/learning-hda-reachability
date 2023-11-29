@@ -8,42 +8,8 @@ from ..learning import transform_ic, inverse_transform_reachsetparam
 from ..reachset import reach_ellipses_torch
 
 
-def get_nn_reachset_param(x0: Tensor, tgo: Tensor, model: nn.Module, full=False):
-    """Compute parameters of soft landing reachable set using NN model.
-
-    Args:
-        x0 (Tensor): initial state
-        tgo (Tensor): time to go
-        model (nn.Module): NN model
-        full (bool, optional): whether to return full set of parameters. Defaults to False.
-
-    Returns (if full=False):
-        xp (Tensor): x-coordinate of intersection of two ellipses
-        xc1 (Tensor): x-coordinate of left ellipse center
-        xc2 (Tensor): x-coordinate of right ellipse center
-        a1 (Tensor): left ellipse semi-major axis
-        a2 (Tensor): right ellipse semi-major axis
-        b1 (Tensor): left ellipse semi-minor axis
-        b2 (Tensor): right ellipse semi-minor axis
-        rotation_angle (Tensor): rotation angle of reachset
-        center (Tensor): center of reachset
-
-    Returns (if full=True):
-        xmin (Tensor): minimum x coordinate of reachset
-        xmax (Tensor): maximum x coordinate of reachset
-        alpha (Tensor): x-coordinate of intersection of two ellipses, as a rate of (xmax - xmin) from xmin
-        xp (Tensor): x-coordinate of intersection of two ellipses
-        yp (Tensor): y-coordinate of intersection of two ellipses
-        xc1 (Tensor): x-coordinate of left ellipse center
-        xc2 (Tensor): x-coordinate of right ellipse center
-        a1 (Tensor): left ellipse semi-major axis
-        a2 (Tensor): right ellipse semi-major axis
-        b1 (Tensor): left ellipse semi-minor axis
-        b2 (Tensor): right ellipse semi-minor axis
-        rotation_angle (Tensor): rotation angle of reachset
-        center (Tensor): center of reachset
-    """
-    eps = 1e-8  # small constant to prevent numerical instability
+def get_nn_reachset_param(x0: Tensor, tgo: Tensor, model: nn.Module, fov: float):
+    """Compute parameters of soft landing reachable set using NN model"""
 
     assert x0.shape == (7,), f"Invalid shape of x0: {x0.shape}"
 
@@ -71,68 +37,10 @@ def get_nn_reachset_param(x0: Tensor, tgo: Tensor, model: nn.Module, full=False)
     # compute output (= reachset parameters)
     nn_output = model(nn_input)
     nn_output = nn_output.squeeze(0)
-    feasible, xmin_, xmax_, alpha_, yp_, a1_, a2_ = nn_output
-    xmin, xmax, alpha, yp, a1, a2 = inverse_transform_reachsetparam(
-        xmin_, xmax_, alpha_, yp_, a1_, a2_, alt
-    )
+    xmin_, xmax_, ymax_, x_ymax_ = nn_output
+    xmin, xmax, ymax, x_ymax = inverse_transform_reachsetparam(xmin_, xmax_, ymax_, x_ymax_, alt, fov=fov)
 
-    if full:
-        xc1 = xmin + a1
-        xc2 = xmax - a2
-        xp = alpha * (xmax - xmin) + xmin
-        b1 = torch.sqrt(
-            torch.clamp(yp**2 * (1 - (xp - xc1) ** 2 / (a1**2 + eps)), min=eps)
-        )
-        b2 = torch.sqrt(
-            torch.clamp(yp**2 * (1 - (xp - xc2) ** 2 / (a2**2 + eps)), min=eps)
-        )
-        return xp, xc1, xc2, a1, a2, b1, b2, v_horiz_angle, r[:2]
-
-    else:
-        return feasible, xmin, xmax, alpha, yp, a1, a2, v_horiz_angle, r[:2]
-
-
-def get_nn_reachset(x0: Tensor, tgo: Tensor, model: nn.Module, n: int = 100):
-    """Compute discrete points of soft landing reachable set border using NN model.
-
-    Args:
-        x0 (Tensor): initial state
-        tgo (Tensor): time to go
-        model (nn.Module): NN model
-        n (int, optional): number of points to compute. Defaults to 100.
-
-    Returns:
-        Tensor: reachset points, shape (n, 2)
-    """
-
-    # compute reachset parameters
-    (
-        feasible,
-        xmin,
-        xmax,
-        alpha,
-        yp,
-        a1,
-        a2,
-        rotation_angle,
-        center,
-    ) = get_nn_reachset_param(x0, tgo, model, full=False)
-
-    # compute border of reachset
-    reach_pts = torch.zeros((2 * n - 2, 2))
-    xs = torch.linspace(xmin.item(), xmax.item(), n)
-    ys, _ = reach_ellipses_torch(X=xs, param=(xmin, xmax, alpha, yp, a1, a2))
-    reach_pts[:n, 0] = xs
-    reach_pts[:n, 1] = ys
-    reach_pts[n:, 0] = xs[1:-1]
-    reach_pts[n:, 1] = -ys[1:-1]
-
-    # rotate and translate reachset point
-    reach_pts = rot2d_torch(rotation_angle) @ reach_pts.T
-    reach_pts += center.reshape(2, 1)
-    reach_pts = reach_pts.T
-
-    return feasible, reach_pts
+    return xmin, xmax, ymax, x_ymax, v_horiz_angle, r[:2]
 
 
 def rot2d_torch(theta: Tensor):
