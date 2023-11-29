@@ -1,10 +1,10 @@
 import numpy as np
-import torch
+#import torch
 
 # Parameters for NN input
-ALT_MAX = 1500.0
+ALT_MAX = 2000.0
 ALT_MIN = 0.0
-TGO_MAX = 150.0
+TGO_MAX = 200.0
 TGO_MIN = 0.0
 VX_MAX = 100.0
 VX_MIN = 0.0
@@ -12,13 +12,14 @@ VZ_MAX = 100.0
 VZ_MIN = -100.0
 MASS_MAX = 1905.0
 MASS_MIN = 1505.0
-Z_MAX = torch.log(torch.tensor(MASS_MAX))
-Z_MIN = torch.log(torch.tensor(MASS_MIN))
+#Z_MAX = torch.log(torch.tensor(MASS_MAX))
+#Z_MIN = torch.log(torch.tensor(MASS_MIN))
+Z_MAX = np.log(MASS_MAX)
+Z_MIN = np.log(MASS_MIN)
 
 # Parameters for NN output
-FOV = torch.tensor(0.2617993877991494)  # 15 degrees in radian
-FOV_R_MAX = ALT_MAX * torch.tan(FOV / 2)
-SMA_MAX = ALT_MAX * 10
+#FOV = torch.tensor(0.2617993877991494)  # 15 degrees in radian
+FOV = 0.2617993877991494
 
 
 def transform_ic(alt, vx, vz, z, tgo):
@@ -53,7 +54,7 @@ def inverse_transform_ic(alt_, vx_, vz_, z_, tgo_):
 
 def transform_reachsetparam(xmin, xmax, ymax, x_ymax, alt, fov=FOV):
     """transform values to [0, 1]"""
-    assert ymax >= 0, "ymax must be positive"
+    assert np.all(ymax >= 0), "ymax must be positive"
     # normalize
     fov_radius = (alt * np.tan(fov / 2)) * 1.05  # 5% safety factor
     xmin_ = (xmin + fov_radius) / fov_radius / 2
