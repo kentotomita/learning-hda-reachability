@@ -42,6 +42,28 @@ def random_sampling_in_hull(simplex_eqs, bounds, n_samples, seed=0):
     return samples
 
 
+def random_sampling_outside_hull(simplex_eqs, bounds, n_samples, seed=0):
+    """Sample random points outside a convex hull; a hull is defined by a set of linear equations.
+
+    Args:
+        simplex_eqs (list): List of linear equations defining the convex hull. (n_points, n_dim).  Ax + b <= 0.
+        bounds (tuple): Bounds of the convex hull. (lb, ub)
+        n_samples (int): Number of samples to generate.
+    """
+    lb, ub = bounds
+    samples = np.empty((n_samples, len(lb)))
+    rng = np.random.RandomState(seed=seed)
+    i = 0
+    while i < n_samples:
+        #random_point = lb + (ub - lb) * np.random.random(size=lb.shape)
+        random_point = lb + (ub - lb) * rng.random(size=lb.shape)
+        if not inside_hull(random_point, simplex_eqs):
+            samples[i] = random_point
+            i += 1
+
+    return samples
+
+
 def structured_sample_points_in_convex_hull(hull, n_per_dim, points, buffer=0.1):
     """Samples points within a convex hull by partitioning the hull for each dimension.
     The subsequent partitions are made within the bounds of the subspace defined by the previous partitions.
