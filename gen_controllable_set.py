@@ -1,4 +1,4 @@
-"""Generate controllable set; possible initial states given the terminal state set"""
+"""Generate controllable set; possible initial states given the terminal state set. (Step 1)"""
 import yaml
 import argparse
 import pickle

@@ -1,4 +1,4 @@
-"""Generate initial conditions by sampling points from the controllable set."""
+"""Generate initial conditions by sampling points from the controllable set. (Step 2)"""
 import argparse
 import multiprocessing as mp
 import numpy as np
