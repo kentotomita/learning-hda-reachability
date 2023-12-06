@@ -22,14 +22,17 @@ Z_MIN = np.log(MASS_MIN)
 FOV = 0.2617993877991494
 
 
-def transform_ic(alt, vx, vz, z, tgo):
+def transform_ic(alt, vx, vz, z, tgo, vx_negative_allowed=False):
     """
     Transform initial conditions to normalized coordinates.
     """
 
     # normalize
     alt_ = (alt - ALT_MIN) / (ALT_MAX - ALT_MIN)
-    vx_ = (vx - VX_MIN) / (VX_MAX - VX_MIN)
+    if vx_negative_allowed:
+        vx_ = (vx + VX_MAX) / 2 / VX_MAX
+    else:
+        vx_ = (vx - VX_MIN) / (VX_MAX - VX_MIN)
     vz_ = (vz - VZ_MIN) / (VZ_MAX - VZ_MIN)
     z_ = (z - Z_MIN) / (Z_MAX - Z_MIN)
     tgo_ = (tgo - TGO_MIN) / (TGO_MAX - TGO_MIN)
@@ -37,14 +40,17 @@ def transform_ic(alt, vx, vz, z, tgo):
     return alt_, vx_, vz_, z_, tgo_
 
 
-def inverse_transform_ic(alt_, vx_, vz_, z_, tgo_):
+def inverse_transform_ic(alt_, vx_, vz_, z_, tgo_, vx_negative_allowed=False):
     """
     Inverse transform normalized coordinates to initial conditions.
     """
 
     # inverse normalize
     alt = alt_ * (ALT_MAX - ALT_MIN) + ALT_MIN
-    vx = vx_ * (VX_MAX - VX_MIN) + VX_MIN
+    if vx_negative_allowed:
+        vx = vx_ * VX_MAX * 2 - VX_MAX
+    else:
+        vx = vx_ * (VX_MAX - VX_MIN) + VX_MIN
     vz = vz_ * (VZ_MAX - VZ_MIN) + VZ_MIN
     z = z_ * (Z_MAX - Z_MIN) + Z_MIN
     tgo = tgo_ * (TGO_MAX - TGO_MIN) + TGO_MIN

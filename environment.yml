@@ -1,0 +1,13 @@
+name: pygmo2
+channels:
+  - conda-forge
+  - numba
+  - pytorch
+dependencies:
+  - pygmo
+  - pygmo_plugins_nonfree
+  - numba
+  - cvxpy
+  - pytorch
+  - notebook
+  - matplotlib

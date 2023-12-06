@@ -1,6 +1,6 @@
 import torch
 from torch.autograd import Variable
-from torch.optim import Adam
+from torch.optim import Adam, SGD
 from scipy.optimize import basinhopping
 
 

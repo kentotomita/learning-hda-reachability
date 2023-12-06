@@ -5,7 +5,6 @@ import torch.nn as nn
 from matplotlib import pyplot as plt
 
 from ..learning import transform_ic, inverse_transform_reachsetparam
-from ..reachset import reach_ellipses_torch
 
 
 def get_nn_reachset_param(x0: Tensor, tgo: Tensor, model: nn.Module, fov: float):

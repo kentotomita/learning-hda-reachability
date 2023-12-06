@@ -76,7 +76,7 @@ class FeasibilityDataset(Dataset):
         # --------------------
         # Process Initial Condition (IC) = Input
         # --------------------
-        alt_, vx_, vz_, z_, tgo_ = transform_ic(alt, vx, vz, z, tgo)
+        alt_, vx_, vz_, z_, tgo_ = transform_ic(alt, vx, vz, z, tgo, vx_negative_allowed=True)
         ic_ = np.array([alt_, vx_, vz_, z_, tgo_])
 
         # convert to torch tensor

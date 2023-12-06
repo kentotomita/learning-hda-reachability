@@ -23,12 +23,12 @@ def u_2mean_safety(u_: Tensor, tgo_next: Tensor, x0: Tensor, dt: float, rocket: 
         reachable_mask (torch.Tensor): reachable mask, shape (N, )
     """
     # propagate dynamics
-    x = u_2x(u_, x0, dt, rocket)
+    x_next = u_2x(u_, x0, dt, rocket)
     
     # compute mean safety on the reachable safety map
-    mean_safety, reachable_mask = ic2mean_safety(x, tgo_next, model, sfmap, border_sharpness, fov)
+    mean_safety, reachable_mask = ic2mean_safety(x_next, tgo_next, model, sfmap, border_sharpness, fov)
     
-    return mean_safety, reachable_mask
+    return mean_safety, reachable_mask, x_next
 
 
 def u_2x(u_: Tensor, x0: Tensor, dt: float, rocket: nn.Module):
@@ -70,21 +70,21 @@ def dynamics(x: torch.Tensor, u: torch.Tensor, dt: float, g: torch.Tensor, alpha
     x_ = torch.zeros_like(x)
     x_[:3] = x[:3] + dt * x[3:6] + dt22 * (u/mass + g)
     x_[3:6] = x[3:6] + dt * (u/mass + g)
-    x_[6] = x[6] - dt * alpha * torch.norm(u) / mass
+    x_[6] = x[6] - dt * alpha * torch.norm(u) / mass  # dynamics of log(mass)
     return x_
 
 
-def inverse_transform_u(u_: Tensor, rho1: Tensor, rho2: Tensor, pa: Tensor):
+def inverse_transform_u(u_: Tensor, rho1: Tensor, rho2: Tensor, pa_ub: Tensor):
     """Inverse transform: from normalized thrust vector u_ to thrust vector u.
 
     Args:
         u_ (torch.Tensor): normalized control parameter, [0, 1], shape (3, )
-            - u_[0] is the normalized norm of u
-            - u_[1] is the normalized x element
-            - u_[2] is the normalized y element
+            - u_[0] is the throttle; normalized norm of u
+            - u_[1] is gimbal angle rate; angle from the z axis
+            - u_[2] is angle from the x axis
         rho1 (Tensor): minimum thrust
         rho2 (Tensor): maximum thrust
-        pa (Tensor): maximum gimbal angle
+        pa_ub (Tensor): maximum gimbal angle
     
     Returns:
         torch.Tensor: control, shape (3, )
@@ -93,39 +93,35 @@ def inverse_transform_u(u_: Tensor, rho1: Tensor, rho2: Tensor, pa: Tensor):
 
     eps = 1e-8
     u = torch.zeros(3)
-    
-    u_norm = u_[0] * (rho2 - rho1) + rho1
-    
-    R = u_norm * torch.sin(pa)  # radius of the the circle that intersects |u|==u_norm sphere and angle(u, uz)==pa
-    u_xy_ = (u_[:2] * 2 - 1) * R  # u_xy_ lies on the [-R, R] square 
-    u_xy_norm = torch.norm(u_xy_)  
-    u_xy_norm_clamped = torch.clamp(u_xy_norm, torch.tensor(0.), R)  # u_xy_norm_clamped is bounded by [0, R]
-    u[:2] = u_xy_ * u_xy_norm_clamped / (u_xy_norm+eps)  # u_xy lies inside the circle with radius R
-    u[2] = torch.sqrt(u_norm**2 - u_xy_norm_clamped**2)  # u_z is determined by u_norm and u_xy
 
+    throttle = u_[0]
+    pa = u_[1] * pa_ub  # pa is determined by u_[1] and pa_ub
+    theta = u_[2] * torch.pi * 2  # gimbal is determined by u_[2] and 2*pi
+
+    u_norm = throttle * (rho2 - rho1) + rho1
+    u[2] = u_norm * torch.cos(pa)  # u_z is determined by u_norm and pa
+    u[0] = u_norm * torch.sin(pa) * torch.cos(theta)  # u_x
+    u[1] = u_norm * torch.sin(pa) * torch.sin(theta)  # u_y
     return u
 
 
-def transform_u(u: Tensor, rho1: Tensor, rho2: Tensor, pa: Tensor):
+def transform_u(u: Tensor, rho1: Tensor, rho2: Tensor, pa_ub: Tensor):
     """Transform thrust vector u to normalized thrust vector u_.
     
     Args:
         u (torch.Tensor): control, shape (3, )
         rho1 (Tensor): minimum thrust
         rho2 (Tensor): maximum thrust
-        pa (Tensor): maximum gimbal angle
+        pa_ub (Tensor): maximum gimbal angle
     
     """
     u_ = torch.zeros(3)
     u_norm = torch.norm(u)
     u_xy_norm = torch.norm(u[:2])
-    pa_num = torch.atan2(u_xy_norm, u[2])
-    assert u_norm >= rho1 and u_norm <= rho2, "u_norm {} is out of range: [{}, {}]".format(u_norm, rho1, rho2)
-    assert pa_num <= pa, "pa_num is out of range"
 
     u_[0] = (u_norm - rho1) / (rho2 - rho1)
-    u_[:2] = (u[:2] / u_xy_norm + 1) / 2
-
+    u_[1] = torch.atan2(u_xy_norm, u[2]) / pa_ub
+    u_[2] = torch.atan2(u[1], u[0]) / (2 * torch.pi)
     return u_
 
 

@@ -3,6 +3,7 @@ import numpy as np
 import numba
 from scipy.optimize import linprog
 import time
+from tqdm import tqdm
 
 
 @numba.njit
@@ -53,6 +54,7 @@ def random_sampling_outside_hull(simplex_eqs, bounds, n_samples, seed=0):
     lb, ub = bounds
     samples = np.empty((n_samples, len(lb)))
     rng = np.random.RandomState(seed=seed)
+    pbar = tqdm(total=n_samples)
     i = 0
     while i < n_samples:
         #random_point = lb + (ub - lb) * np.random.random(size=lb.shape)
@@ -60,6 +62,7 @@ def random_sampling_outside_hull(simplex_eqs, bounds, n_samples, seed=0):
         if not inside_hull(random_point, simplex_eqs):
             samples[i] = random_point
             i += 1
+            pbar.update(1)
 
     return samples
 

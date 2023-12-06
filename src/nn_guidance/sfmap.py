@@ -56,10 +56,12 @@ def make_simple_sfmap(x_range, y_range, n_points, dtype="float32"):
     sfmap = np.zeros((n_points, n_points, 3))
     sfmap[:, :, 0] = X
     sfmap[:, :, 1] = Y
-    sfmap[:, :, 2] = X + Y
-    sfmap[:, :, 2] = (sfmap[:, :, 2] - np.min(sfmap[:, :, 2])) / (
-        np.max(sfmap[:, :, 2]) - np.min(sfmap[:, :, 2])
-    )
+    sfmap[:, :, 2] = X + Y 
+    sfmap[:, :, 2] = (sfmap[:, :, 2] - np.min(sfmap[:, :, 2])) / (np.max(sfmap[:, :, 2]) - np.min(sfmap[:, :, 2]))
+    sfmap[:, :, 2][X > 500] = 0.0
+    sfmap[:, :, 2][Y > 500] = 0.0
+    sfmap[:, :, 2][X < -500] = 0.0
+    sfmap[:, :, 2][Y < -500] = 0.0
 
     sfmap = sfmap.reshape(-1, 3)
     if dtype == "float32":
