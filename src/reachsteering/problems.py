@@ -3,20 +3,21 @@
 import numpy as np
 import pygmo as pg
 from numba import jit, float64
+from ..landers import Lander
 
 
-class MinFuelCtrl():
+class MinFuel():
     """Minimum Fuel problem where control sequence is decision variable"""
 
-    def __init__(self, rocket, N, x0, tgo):
+    def __init__(self, lander, N, x0, tgo):
         """Initialize the problem
 
         Args:
-            rocket (Rocket): rocket (lander) model
+            lander (lander): lander (lander) model
             x0 (np.array-like): initial state
             tgo (float): time-to-go
         """
-        self.rocket = rocket
+        self.lander = lander
         self.N = N
         self.x0 = x0
         self.tgo = tgo
@@ -30,16 +31,16 @@ class MinFuelCtrl():
             u_ (np.array-like): decision vector
         """
         # Unnormalize control sequence
-        u = u_.reshape(self.N, 3) * self.rocket.rho2
+        u = u_.reshape(self.N, 3) * self.lander.rho2
 
         # Propagate dynamics
-        r, v, z = _propagate_state(self.x0, u, self.N, self.dt, self.rocket.g, self.rocket.alpha)
+        r, v, z = _propagate_state(self.x0, u, self.N, self.dt, self.lander.g, self.lander.alpha)
 
         # Compute constraints
-        cstr_eq, cstr_ineq = _get_cstr(r, v, z, u, self.N, self.rocket.rho1, self.rocket.rho2, self.rocket.pa, self.rocket.gsa, self.rocket.vmax)
+        cstr_eq, cstr_ineq = _get_cstr(r, v, z, u, self.N, self.lander.rho1, self.lander.rho2, self.lander.pa, self.lander.gsa, self.lander.vmax)
 
         # Compute fitness
-        obj = _minfuel(u, self.N, self.rocket.alpha, self.dt)
+        obj = _minfuel(u, self.N, self.lander.alpha, self.dt)
         return [obj] + list(cstr_eq) + list(cstr_ineq)
         
     def get_nec(self):
@@ -67,27 +68,52 @@ class MinFuelCtrl():
 
 class MinFuelStateCtrl():
     """Minimum Fuel problem where state and control sequences are decision variables"""
-    def __init__(self, rocket, N, x0, tgo):
+    def __init__(self, lander: Lander, N: int, x0: np.ndarray, tgo: float):
         """Initialize the problem
 
         Args:
-            rocket (Rocket): rocket (lander) model
+            lander (lander): lander (lander) model
             x0 (np.array-like): initial state
             tgo (float): time-to-go
         """
-        self.rocket = rocket
+        self.lander = lander
         self.N = N
         self.x0 = x0
         self.tgo = tgo
         self.dt = tgo / N
         self.t = np.linspace(0, tgo, N + 1)
-
+        
         # Scaling factors for normalization
-        self.R_ref = 1000
-        self.Acc_ref = abs(self.rocket.g[2])
-        self.T_ref = np.sqrt(self.R_ref / self.Acc_ref)
-        self.V_ref = self.R_ref / self.T_ref
-        self.Z_ref = np.log(self.rocket.mdry)
+        self.LU = lander.LU
+        self.TU = lander.TU
+        self.MU = lander.MU
+
+        # normalized lander parameters
+        self.alpha_ = lander.alpha / (self.TU / self.LU)  # alpha [s/m]
+        self.rho1_ = lander.rho1 / (self.MU * self.LU / self.TU ** 2)  # rho1 [kg m/s^2]
+        self.rho2_ = lander.rho2 / (self.MU * self.LU / self.TU ** 2)  # rho2 [kg m/s^2]
+        self.vmax_ = lander.vmax / (self.LU / self.TU)  # vmax [m/s]
+        self.g_ = lander.g / (self.LU / self.TU ** 2)  # g [m/s^2]
+
+    def unpack_decision_vector(self, x):
+        """Unpack decision vector into states and controls
+
+        Args:
+            x (np.array-like): decision vector
+        """
+        # Unpack decision vector
+        r_ = x[:3 * (self.N + 1)].reshape(self.N + 1, 3)
+        v_ = x[3 * (self.N + 1):6 * (self.N + 1)].reshape(self.N + 1, 3)
+        z_ = x[6 * (self.N + 1):7 * (self.N + 1)]
+        u_ = x[7 * (self.N + 1):].reshape(self.N, 3)
+        return r_, v_, z_, u_
+    
+    def dimensionalize(self, r_, v_, z_, u_):
+        r = r_ * self.LU
+        v = v_ * self.LU / self.TU
+        z = z_ * self.MU
+        u = u_ * self.MU * self.LU / self.TU ** 2
+        return r, v, z, u
         
     def fitness(self, x):
         """Compute fitness for given decision vector x
@@ -96,28 +122,21 @@ class MinFuelStateCtrl():
             x (np.array-like): decision vector
         """
         # Unpack decision vector
-        r_ = x[:3 * self.N].reshape(self.N, 3)
-        v_ = x[3 * self.N:6 * self.N].reshape(self.N, 3)
-        z_ = x[6 * self.N:7 * self.N]
-        u_ = x[7 * self.N:].reshape(self.N, 3)
+        r_, v_, z_, u_ = self.unpack_decision_vector(x)
 
-
-        # Unnormalize control sequence
-        u = u_.reshape(self.N, 3) * self.rocket.rho2
-
-        # Propagate dynamics
-        r, v, z = _propagate_state(self.x0, u, self.N, self.dt, self.rocket.g, self.rocket.alpha)
+        # Dynamics constraints
+        cstr_eq_dyn = _dynamics_cstr(r_, v_, z_, u_, self.dt / self.TU, self.g_, self.alpha_, self.N)
 
         # Compute constraints
-        cstr_eq, cstr_ineq = _get_cstr(r, v, z, u, self.N, self.rocket.rho1, self.rocket.rho2, self.rocket.pa, self.rocket.gsa, self.rocket.vmax)
+        cstr_eq, cstr_ineq = _get_cstr(r_, v_, z_, u_, self.N, self.rho1_, self.rho2_, self.lander.pa, self.lander.gsa, self.vmax_)
 
         # Compute fitness
-        obj = _minfuel(u, self.N, self.rocket.alpha, self.dt)
-        return [obj] + list(cstr_eq) + list(cstr_ineq)
+        obj = _minfuel(u_, self.N, self.alpha_, self.dt / self.TU)
+        return [obj] + list(cstr_eq_dyn) + list(cstr_eq) + list(cstr_ineq)
         
     def get_nec(self):
         """Return number of equality constraints"""
-        return 4
+        return 4 + 7 * self.N
 
     def get_nic(self):
         """Return number of inequality constraints"""
@@ -131,7 +150,8 @@ class MinFuelStateCtrl():
                 lb (np.array-like): lower bound
                 ub (np.array-like): upper bound
         """
-        return -np.ones(3 * self.N), np.ones(3 * self.N)
+        n_dim = 7 * (self.N + 1) + 3 * self.N
+        return -np.ones(n_dim) * 3, np.ones(n_dim) * 3
 
     def gradient(self, x):
         """Compute gradient of fitness function for given decision vector x"""
@@ -148,16 +168,16 @@ class MinFuelStateCtrl():
 class ReachSteering():
     """Reachability steering problem"""
 
-    def __init__(self, rocket, N, x0, tgo, nn_reach):
+    def __init__(self, lander, N, x0, tgo, nn_reach):
         """Initialize the problem
 
         Args:
-            rocket (Rocket): rocket (lander) model
+            lander (lander): lander (lander) model
             x0 (np.array-like): initial state
             tgo (float): time-to-go
             nn_reach (torch.nn.Module): neural network model for reachable set evaluation
         """
-        self.rocket = rocket
+        self.lander = lander
         self.N = N
         self.x0 = x0
         self.tgo = tgo
@@ -172,17 +192,17 @@ class ReachSteering():
             u_ (np.array-like): decision vector
         """
         # Unnormalize control sequence
-        u = u_.reshape(self.N, 3) * self.rocket.rho2
+        u = u_.reshape(self.N, 3) * self.lander.rho2
 
         # Propagate dynamics
-        r, v, z = _propagate_state(self.x0, u, self.N, self.dt, self.rocket.g, self.rocket.alpha)
+        r, v, z = _propagate_state(self.x0, u, self.N, self.dt, self.lander.g, self.lander.alpha)
 
         # Compute constraints
-        cstr_eq, cstr_ineq = _get_cstr(r, v, z, u, self.N, self.rocket.rho1, self.rocket.rho2, self.rocket.pa, self.rocket.gsa, self.rocket.vmax)
+        cstr_eq, cstr_ineq = _get_cstr(r, v, z, u, self.N, self.lander.rho1, self.lander.rho2, self.lander.pa, self.lander.gsa, self.lander.vmax)
 
         if return_obj:
             # Compute fitness
-            obj = _minfuel(u, self.N, self.rocket.alpha, self.dt)
+            obj = _minfuel(u, self.N, self.lander.alpha, self.dt)
             return [obj] + list(cstr_eq) + list(cstr_ineq)
         else:
             return list(cstr_eq) + list(cstr_ineq)
@@ -221,6 +241,37 @@ def _dynamics(r, v, z, u, dt, g, alpha):
     return r_next, v_next, z_next
 
 @jit(nopython=True)
+def _dynamics_cstr(r, v, z, u, dt, g, alpha, N):
+    """Equality constraints for the dynamics of the lander
+    
+    Args:
+        r (np.array): position
+        v (np.array): velocity
+        z (np.array): log of mass
+        u (np.array): control
+        dt (float): time step
+        g (np.array): gravity
+        alpha (float): fuel consumption rate
+        N (int): number of time steps
+
+    Returns:
+        np.array: equality constraints, (N * 7,)
+    """
+    cstr_eq = np.zeros(N * 7)
+    for i in range(N):
+        mass = np.exp(z[i])
+        a = u[i] / mass + g
+        for j in range(3):
+            # Position dynamics
+            cstr_eq[i * 7 + j] = r[i, j] + dt * v[i, j] + dt ** 2 / 2.0 * a[j] - r[i + 1, j]
+            # Velocity dynamics
+            cstr_eq[i * 7 + 3 + j] = v[i, j] + dt * a[j] - v[i + 1, j]
+        # Mass dynamics
+        cstr_eq[i * 7 + 6] = (z[i] - dt * alpha * np.linalg.norm(u[i]) / mass) - z[i + 1]
+
+    return cstr_eq
+
+@jit(nopython=True)
 def _propagate_state(x0, u, N, dt, g, alpha):
     r = np.zeros((N + 1, 3))
     v = np.zeros((N + 1, 3))
@@ -241,8 +292,8 @@ def _get_cstr(r, v, z, u, N, rho1, rho2, pa, gsa, vmax):
     cstr_ineq = np.zeros(5 * N + 3)
 
     # Equality constraints
-    cstr_eq[0] = r[N, 2]
-    cstr_eq[1:] = v[N, :]
+    cstr_eq[0] = r[N, 2]  # Final altitude = 0
+    cstr_eq[1:] = v[N, :]  # Final velocity = 0
 
     # Inequality constraints
     i_ieq = 0

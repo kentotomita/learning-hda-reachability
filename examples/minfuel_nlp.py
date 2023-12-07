@@ -3,10 +3,9 @@ import cvxpy as cp
 import pygmo as pg
 from pygmo_plugins_nonfree import snopt7
 import numpy as np
-import matplotlib.pyplot as plt
 import sys
 sys.path.append('../')
-from src.reachsteering import MinFuel
+from src.reachsteering import MinFuelStateCtrl
 from src.visualization import *
 import src.lcvx as lc
 
@@ -39,36 +38,31 @@ def main():
         X = np.hstack((r.T, v.T, m.reshape(-1, 1)))
         U = u.T * m[:-1].reshape(-1, 1)
 
-        udp = MinFuel(lander, N, x0, tf)
+        udp = MinFuelStateCtrl(lander, N, x0, tf)
         prob = pg.problem(udp)
 
-        uda = snopt7(screen_output=False, library="C:/Users/ktomita3/libsnopt7/snopt7.dll", minor_version=7)
+        uda = snopt7(screen_output=True, library="C:/Users/ktomita3/libsnopt7/snopt7.dll", minor_version=7)
         uda.set_integer_option("Major Iteration Limit", 1000)
         #uda = pg.ipopt()
         algo = pg.algorithm(uda)
 
         #algo.extract(snopt7).set_integer_option("Major Iteration Limit", 1000)
         #algo.extract(snopt7).set_numeric_option("Major feasibility tolerance", 1E-10)
-        algo.set_verbosity(1)
+        #algo.set_verbosity(1)
 
         print(algo)
 
-        pop = pg.population(prob, 0)
-        u_0 = U.flatten() / lander.rho2
-        pop.push_back(u_0)
+        pop = pg.population(prob, 1)
+        #x_udp_0 = np.hstack((X.flatten() / lander.LU, U.flatten() / (lander.MU * lander.LU / lander.TU ** 2)))
+        #print(f"{x_udp_0.shape} = ({N+1}*7 + {N}*3,)")
+        #pop.push_back(x_udp_0)
         print(pop)
 
         result = algo.evolve(pop)
         print(result)
 
-        U = result.champion_x.reshape(-1, 3) * lander.rho2
-        r, v, z = np.zeros((N + 1, 3)), np.zeros((N + 1, 3)), np.zeros(N + 1)
-        r[0] = x0[:3]
-        v[0] = x0[3:6]
-        z[0] = x0[6]
-        from src.reachsteering.problems import _dynamics
-        for i in range(N):
-                r[i + 1], v[i + 1], z[i + 1] = _dynamics(r[i], v[i], z[i], U[i], tf/N, lander.g, lander.alpha)
+        r_, v_, z_, u_ = udp.unpack_decision_vector(result.champion_x)
+        r, v, z, U = udp.dimensionalize(r_, v_, z_, u_)
 
         X = np.hstack((r, v, np.exp(z).reshape(-1, 1)))
         t = np.linspace(0, tf, N + 1)
