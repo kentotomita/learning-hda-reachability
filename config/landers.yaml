@@ -12,4 +12,6 @@ Mars:
   gsa: 0.4363323129985824  # glide slope angle (rad) = 25 deg
   fov: 0.2617993877991494  # field of view (rad) = 15 deg
   pa: 0.5235987755982988   # pointing angle (rad) = 30 deg
-  vmax: 100.0  # m/s
+  vmax: 100.0  # maximum velocity (m/s)
+  R_MAX: 2000.0  # Maximum x, y, z bound (m)
+  LU: 1000.0  # Length unit (m) for scaling

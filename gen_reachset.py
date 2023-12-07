@@ -12,6 +12,7 @@ from typing import List
 import sys
 sys.path.append('..')
 import src.lcvx as lc
+from src import Lander
 
 
 def main():
@@ -62,7 +63,7 @@ def main():
     print('Total time: {:.2f} m'.format((time.time() - start) / 60))
 
 
-def solve_parallel(ic_data: np.ndarray, N: int, lander: lc.Rocket, tgo_round: float, n_proc: int):
+def solve_parallel(ic_data: np.ndarray, N: int, lander: Lander, tgo_round: float, n_proc: int):
     """Solve the convex program for given initial conditions in parallel.
 
     Args:
@@ -114,12 +115,12 @@ def solve_parallel(ic_data: np.ndarray, N: int, lander: lc.Rocket, tgo_round: fl
     return data
 
 
-def solve(ic_list: List[np.ndarray], lander: lc.Rocket, N: int):
+def solve(ic_list: List[np.ndarray], lander: Lander, N: int):
     """Solve for the reachable bound for given initial conditions.
 
     Args:
         ic_list: list of initial conditions; each initial condition is a numpy array of shape (5, )
-        lander: Rocket object
+        lander: lander object
         N: number of discretization
 
     Returns:
@@ -133,7 +134,7 @@ def solve(ic_list: List[np.ndarray], lander: lc.Rocket, N: int):
     rf_xmax = []
     rf_xmin = []
     tgo_before = None
-    lcvx = lc.LCvxReachabilityRxy(rocket=lander, N=N, directional_cstr=True)
+    lcvx = lc.LCvxReachabilityRxy(lander=lander, N=N, directional_cstr=True)
     for ic in ic_list:
         # unpack initial condition
         h, vx, vz, m, tgo = ic
@@ -177,7 +178,7 @@ def solve(ic_list: List[np.ndarray], lander: lc.Rocket, N: int):
     ic_ymax = []
     rf_ymax = []
     tgo_before = None
-    lcvx = lc.LCvxReachabilityRxy(rocket=lander, N=N, directional_cstr=False)
+    lcvx = lc.LCvxReachabilityRxy(lander=lander, N=N, directional_cstr=False)
     for ic in ic_list:
         # unpack initial condition
         h, vx, vz, m, tgo = ic

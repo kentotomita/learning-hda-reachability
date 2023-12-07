@@ -1,6 +1,4 @@
 """Helper functions for CVXPY."""
-
-import cvxpy as cp
 from cvxpy import Problem
 
 

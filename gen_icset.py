@@ -75,6 +75,7 @@ def main():
     with open(os.path.join(out_dir, 'meta.txt'), 'w') as f:
         f.write('random_samples: {}\n'.format(random_samples.shape))
         f.write('structured_samples: {}\n'.format(structured_samples.shape))
+        f.write('n_proc: {}\n'.format(args.n_proc))
         f.write('time: {}\n min'.format((time.time() - start)/60))
 
 

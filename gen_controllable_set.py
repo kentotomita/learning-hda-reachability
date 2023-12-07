@@ -9,11 +9,14 @@ import multiprocessing as mp
 from itertools import product
 from tqdm import tqdm
 import datetime
+import time
 import src.lcvx as lc
-from config.landers import get_lander
+from src import Lander, get_lander
 
 
 def main(n_proc: int=1):
+    start = time.time()
+
     # Parameters
     planet = 'Mars'
     lander = get_lander(planet=planet)
@@ -31,7 +34,7 @@ def main(n_proc: int=1):
     # Save config
     with open(os.path.join(out_dir, 'config.yaml'), 'w') as f:
         yaml.dump(ctrlset_data, f)
-    # pickle rocket object
+    # pickle lander object
     with open(os.path.join(out_dir, 'lander.pkl'), 'wb') as f:
         pickle.dump(lander, f)
 
@@ -59,20 +62,24 @@ def main(n_proc: int=1):
     # Post-processing
     data = np.array(data)
     data = data[(data[:, 3] >= 0)]  # Remove negative vx
-    data = data[(data[:, 6] <= lander.mwet)]  # Remove over-sized initial mass
 
     # Save data
     # save header and data
     data_header = ['rx', 'ry', 'rz', 'vx', 'vy', 'vz', 'm0', 'tgo', 'mf']
     np.savetxt(os.path.join(out_dir, 'data_header.txt'), data_header, fmt='%s')
     np.save(os.path.join(out_dir, 'data.npy'), np.array(data))
+    # save meta data
+    with open(os.path.join(out_dir, 'meta.txt'), 'w') as f:
+        f.write('data shape: {}\n'.format(data.shape))
+        f.write('n_proc: {}\n'.format(n_proc))
+        f.write('time: {} min'.format((time.time() - start)/60))
 
 
-def solve(rocket: lc.Rocket, N: int, xf_bounds: tuple, tgo: float, alt_set: list, theta_list: list, d_mass: float):
+def solve(lander: Lander, N: int, xf_bounds: tuple, tgo: float, alt_set: list, theta_list: list, d_mass: float):
     """Solve for controllable set for given parameters.
     
     Args:
-        rocket (lc.Rocket): Rocket object
+        lander (Lander): lander object
         N (int): number of discretization
         xf_bounds (tuple): bounds for terminal state
         tgo (float): time to go
@@ -86,7 +93,7 @@ def solve(rocket: lc.Rocket, N: int, xf_bounds: tuple, tgo: float, alt_set: list
 
     # solve for mass bounds and feasible state space
     state_bounds = np.zeros((len(alt_set), 2, 3))  # (alt, min/max, (mass, vx, vz))
-    lcvx = lc.LCvxControllability(rocket=rocket, N=N)
+    lcvx = lc.LCvxControllability(lander=lander, N=N)
     prob = lcvx.problem(
         xf_bounds=xf_bounds,
         tf=tgo,
@@ -103,7 +110,7 @@ def solve(rocket: lc.Rocket, N: int, xf_bounds: tuple, tgo: float, alt_set: list
 
     # solve for feasible velocity space
     data = []
-    lcvx = lc.LcVxControllabilityVxz(rocket=rocket, N=N)
+    lcvx = lc.LcVxControllabilityVxz(lander=lander, N=N)
     prob = lcvx.problem(xf_bounds=xf_bounds, tf=tgo)
     for i, alt in enumerate(alt_set):
         if state_bounds[i, 0, 0] == 0.0 or state_bounds[i, 1, 0] == 0.0:
@@ -156,10 +163,10 @@ def _solve(data, lcvx, prob, tgo):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Process some integers.")
-    parser.add_argument('--processors', type=int, default=1, help='an integer for the number of processors')
+    parser.add_argument('--n_proc', type=int, default=8, help='number of processors')
     args = parser.parse_args()
 
     # measure execution time
     start = datetime.datetime.now()
-    main(n_proc=args.processors)
+    main(n_proc=args.n_proc)
     print(f'Execution time (min): {(datetime.datetime.now() - start).total_seconds() / 60.0}')

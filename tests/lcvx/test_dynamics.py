@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
 from scipy.integrate import solve_ivp
+from src import Lander
 import src.lcvx as lc
 from src.dynamics import pd_3dof_eom
 
@@ -10,7 +11,9 @@ class TestLCVxDynamics(unittest.TestCase):
 
     def setUp(self):
         # Simulation parameters
-        self.rocket = lc.Rocket(
+        self.rocket = Lander(
+            R_MAX=1000.0,  # Maximum x, y, z bound (m)
+            LU=1000.0,  # Length unit (m) for scaling
             g_=3.7114,  # Gravitational acceleration (m/s^2)
             mdry=1505.0,  # Dry mass (kg)
             mwet=1905.0,  # Wet mass (kg)

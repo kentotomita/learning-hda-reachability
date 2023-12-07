@@ -3,7 +3,7 @@ import cvxpy as cp
 import numpy as np
 import json
 
-from .problem import LCvxProblem
+from .problems import LCvxProblem
 from .cvxpy_helper import get_vars
 
 

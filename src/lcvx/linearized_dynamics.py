@@ -45,7 +45,7 @@ def discrete_sys(dt: float, g: float, alpha: float):
 
     Args:
         dt: Time step (s)
-        g: Gravitational acceleration vector (m/s^2)
+        g: Gravitational acceleration; must be positive scalar (m/s^2)
         alpha: Mass flow rate per thrust (kg/s/N)
 
 
@@ -64,6 +64,7 @@ def discrete_sys(dt: float, g: float, alpha: float):
         [0, 0, 0, 0,  0,  0,  0, 0,       0,        0, 0, 1]
         ])
     """
+    assert g >= 0, "g must be non-negative"
 
     Ad = np.array(
         [
@@ -87,6 +88,6 @@ def discrete_sys(dt: float, g: float, alpha: float):
             [0.0, 0.0, 0.0, -alpha * dt],
         ]
     )
-    pd = np.array([[0.0, 0.0, -(dt**2) * g / 2, 0.0, 0.0, -dt * g, 0.0]]).T
+    pd = np.array([0.0, 0.0, -(dt**2) * g / 2, 0.0, 0.0, -dt * g, 0.0])
 
     return Ad, Bd, pd

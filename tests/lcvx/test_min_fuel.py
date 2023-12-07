@@ -1,5 +1,6 @@
 import unittest
 import numpy as np
+from src import Lander
 import src.lcvx as lc
 import cvxpy as cp
 
@@ -7,7 +8,9 @@ import cvxpy as cp
 class TestLCVxMinFuel(unittest.TestCase):
     def setUp(self):
         # Simulation parameters
-        self.rocket = lc.Rocket(
+        self.lander = Lander(
+            R_MAX=1000.0,  # Maximum x, y, z bound (m)
+            LU=1000.0,  # Length unit (m) for scaling
             g_=3.7114,  # Gravitational acceleration (m/s^2)
             mdry=1505.0,  # Dry mass (kg)
             mwet=1905.0,  # Wet mass (kg)
@@ -19,7 +22,7 @@ class TestLCVxMinFuel(unittest.TestCase):
             vmax=None,
         )
         self.x0 = np.array(
-            [2000.0, 500.0, 1500.0, -100.0, 50.0, -75.0, np.log(self.rocket.mwet)]
+            [2000.0, 500.0, 1500.0, -100.0, 50.0, -75.0, np.log(self.lander.mwet)]
         )
         self.tf = 75.0
         self.N = 55
@@ -30,7 +33,7 @@ class TestLCVxMinFuel(unittest.TestCase):
         # Define problem
 
         lcvx_obj = lc.LCvxMinFuel(
-            rocket=self.rocket,
+            lander=self.lander,
             N=self.N,
             fixed_target=True,
         )
@@ -44,7 +47,7 @@ class TestLCVxMinFuel(unittest.TestCase):
         """Test problem with parameterization of x0"""
         # Define problem
         lcvx_obj = lc.LCvxMinFuel(
-            rocket=self.rocket,
+            lander=self.lander,
             N=self.N,
             parameterize_x0=True,
             fixed_target=True,

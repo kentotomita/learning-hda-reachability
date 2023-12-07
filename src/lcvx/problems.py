@@ -1,10 +1,11 @@
+"""Optimization problems for powered descent via lossless convexification."""
 import numpy as np
 import cvxpy as cp
 
 from typing import Tuple, List, Union
 
-from .discretization import zoh
-from .rocket import Rocket
+from .linearized_dynamics import discrete_sys
+from ..landers import Lander
 
 __all__ = [
     "LCvxProblem",
@@ -21,40 +22,39 @@ class LCvxProblem:
 
     def __init__(
         self,
-        rocket: Rocket,
+        lander: Lander,
         N: int,
         parameterize_x0: bool = False,
         parameterize_tf: bool = False,
     ):
         """Initialize the LCvx class.
         Args:
-            rocket: Rocket object.
+            lander: lander object.
             N: Number of discretization points.
             parameterize_x0: If True, then the initial state is a parameter. Default is False.
             parameterize_tf: If True, then the final time is a parameter. Default is False.
         """
 
-        self.rocket = rocket
+        self.lander = lander
         self.N = N
 
         self.parameterize_x0 = parameterize_x0
         self.parameterize_tf = parameterize_tf
 
         # Scaling factors for normalization
-        self.R_ref = 1000
-        self.Acc_ref = abs(self.rocket.g[2])
+        self.R_ref = lander.LU
+        self.Acc_ref = self.lander.g_
         self.T_ref = np.sqrt(self.R_ref / self.Acc_ref)
         self.V_ref = self.R_ref / self.T_ref
-        # Z_ref = np.log(self.rocket.mwet)
-        self.Z_max = np.log(self.rocket.mwet)
-        self.Z_min = np.log(self.rocket.mdry)
+        self.Z_max = np.log(self.lander.mwet)
+        self.Z_min = np.log(self.lander.mdry)
         self.Sigma_ref = self.Acc_ref
 
     def _parameters(self, x0: np.ndarray, tf: np.ndarray):
         """Define the problem parameters.
 
         Returns:
-            x0: Initial state.
+            x0: Initial state; [rx, ry, rz, vx, vy, vz, z=log(mass)]
             tf: Final time.
             dt: Time step.
             t: Time vector.
@@ -83,7 +83,7 @@ class LCvxProblem:
 
         return x0, tf, dt, t, dt22
 
-    def problem(self, x0: np.ndarray = None, tf: np.ndarray = None) -> cp.Problem:
+    def problem(self) -> cp.Problem:
         """Define the optimization problem."""
         raise NotImplementedError
 
@@ -125,20 +125,20 @@ class LCvxProblem:
         cstr += [cp.norm(u, axis=0) <= sigma]
 
         # Pointing constraint
-        if self.rocket.pa is not None:
-            cstr += [u[2, :] >= sigma * np.cos(self.rocket.pa)]
+        if self.lander.pa is not None:
+            cstr += [u[2, :] >= sigma * np.cos(self.lander.pa)]
 
         # Glide slope constraint
-        if self.rocket.gsa is not None:
+        if self.lander.gsa is not None:
             cstr += [
-                cp.norm(r[:2, i] - r[:2, -1], p=2) * np.tan(self.rocket.gsa)
+                cp.norm(r[:2, i] - r[:2, -1], p=2) * np.tan(self.lander.gsa)
                 <= r[2, i] - r[2, -1]
                 for i in range(self.N + 1)
             ]
 
         # Velocity constraint
-        if self.rocket.vmax is not None:
-            cstr += [cp.norm(v, p=2, axis=0) <= self.rocket.vmax]
+        if self.lander.vmax is not None:
+            cstr += [cp.norm(v, p=2, axis=0) <= self.lander.vmax]
 
         return cstr
 
@@ -162,18 +162,16 @@ class LCvxProblem:
                         == r[i, k]
                         + dt * v[i, k]
                         + dt22 * u[i, k]
-                        + dt22 * self.rocket.g[i]
+                        + dt22 * self.lander.g[i]
                     ]
                     cstr += [
-                        v[i, k + 1] == v[i, k] + dt * u[i, k] + dt * self.rocket.g[i]
+                        v[i, k + 1] == v[i, k] + dt * u[i, k] + dt * self.lander.g[i]
                     ]
-                cstr += [z[k + 1] == z[k] - dt * self.rocket.alpha * sigma[k]]
+                cstr += [z[k + 1] == z[k] - dt * self.lander.alpha * sigma[k]]
 
         # Else, use Numpy arrays
         else:
-            A, B, p = zoh(
-                A=self.rocket.Ac, B=self.rocket.Bc, p=self.rocket.pc, dt=dt
-            )  # discretize dynamics
+            A, B, p = discrete_sys(dt, self.lander.g_, self.lander.alpha)
             for k in range(self.N):
                 xk = cp.hstack([r[:, k], v[:, k], z[k]])
                 x_next = cp.hstack([r[:, k + 1], v[:, k + 1], z[k + 1]])
@@ -193,22 +191,22 @@ class LCvxProblem:
         if self.parameterize_tf:
             for i in range(self.N):
                 z1 = cp.log(
-                    self.rocket.mwet - self.rocket.alpha * self.rocket.rho2 * t[i]
+                    self.lander.mwet - self.lander.alpha * self.lander.rho2 * t[i]
                 )  # mass trajectory lower bound
                 dz = z[i] - z1
-                mu1 = self.rocket.rho1 * cp.exp(-z1)
-                mu2 = self.rocket.rho2 * cp.exp(-z1)
+                mu1 = self.lander.rho1 * cp.exp(-z1)
+                mu2 = self.lander.rho2 * cp.exp(-z1)
                 cstr += [mu1 * (1 - dz + 1 / 2 * dz**2) <= sigma[i]]
                 cstr += [sigma[i] <= mu2 * (1 - dz)]
 
         # If t is NumPy array, use Numpy functions
         else:
             z1 = np.log(
-                self.rocket.mwet - self.rocket.alpha * self.rocket.rho2 * t
+                self.lander.mwet - self.lander.alpha * self.lander.rho2 * t
             )  # mass trajectory lower bound
             dz = z - z1
-            mu1 = self.rocket.rho1 * np.exp(-z1)
-            mu2 = self.rocket.rho2 * np.exp(-z1)
+            mu1 = self.lander.rho1 * np.exp(-z1)
+            mu2 = self.lander.rho2 * np.exp(-z1)
             cstr += [
                 mu1[i] * (1 - dz[i] + 1 / 2 * dz[i] ** 2) <= sigma[i]
                 for i in range(self.N)
@@ -240,7 +238,7 @@ class LCvxProblem:
 class LCvxMinFuel(LCvxProblem):
     def __init__(
         self,
-        rocket: Rocket,
+        lander: Lander,
         N: int,
         fixed_target: bool = False,
         parameterize_tf: bool = False,
@@ -249,14 +247,14 @@ class LCvxMinFuel(LCvxProblem):
         """Landing problem for minimum fuel consumption.
 
         Args:
-            rocket: Rocket model.
+            lander: Lander model.
             N: Number of discretization points.
             fixed_target: If True, the target position is fixed at the origin.
             parameterize_tf: If True, the final time is a parameter.
             parameterize_x0: If True, the initial state is a parameter.
         """
         super().__init__(
-            rocket, N, parameterize_tf=parameterize_tf, parameterize_x0=parameterize_x0
+            lander, N, parameterize_tf=parameterize_tf, parameterize_x0=parameterize_x0
         )
         self.fixed_target = fixed_target
 
@@ -314,7 +312,7 @@ class LCvxMinFuel(LCvxProblem):
             cstr.append(r[2, -1] == 0)  # target altitude is zero
         cstr += [v[:, -1] == np.zeros(3)]  # soft landing; v = 0 at final time
         cstr.append(
-            z[-1] >= np.log(self.rocket.mdry)
+            z[-1] >= np.log(self.lander.mdry)
         )  # final log(mass) >= log(dry mass)
 
         return cstr
@@ -324,15 +322,15 @@ class LCvxReachability(LCvxProblem):
     """Reachability problems; given a bounded initial state set, compute the reachable set. 
     The final altitude and the final velocity are fixed at zero."""
 
-    def __init__(self, rocket: Rocket, N: int, directional_cstr: Union[bool, List[bool]] = False):
+    def __init__(self, lander: Lander, N: int, directional_cstr: Union[bool, List[bool]] = False):
         """Landing problem for computing a reachable set at a specific step.
 
         Args:
-            rocket: Rocket model.
+            lander: Lander model.
             N: Number of discretization points.
             directional_cstr: Directional constraints for each state.
         """
-        super().__init__(rocket, N)
+        super().__init__(lander, N)
         self.directional_cstr = directional_cstr
     
     def problem(
@@ -413,23 +411,23 @@ class LCvxReachability(LCvxProblem):
             cstr += [v[i, 0] == x0[i + 3] for i in range(3)]
             cstr += [z[0] == x0[6]]
         else:
-            raise ValueError("Initial state must be provided.")
+            raise ValueError("Initial state or its bounds must be provided.")
 
-        # Final conditions
+        # Terminal conditions
         cstr.append(r[2, -1] == 0)  # target altitude is zero
         cstr += [v[:, -1] == np.zeros(3)]  # soft landing; v = 0 at final time
         cstr.append(
-            z[-1] >= np.log(self.rocket.mdry)
+            z[-1] >= np.log(self.lander.mdry)
         )  # final log(mass) >= log(dry mass)
 
         return cstr
     
 
 class LCvxReachabilityRxy(LCvxReachability):
-    """Reachability problem class for range in x-z plane."""
+    """Reachability problem class for range in x-y plane."""
 
-    def __init__(self, rocket: Rocket, N: int, directional_cstr: bool = True):
-        super().__init__(rocket, N)
+    def __init__(self, lander: Lander, N: int, directional_cstr: bool = True):
+        super().__init__(lander, N)
         self.directional_cstr = directional_cstr
 
     def problem(self, tf: float):
@@ -441,11 +439,11 @@ class LCvxReachabilityRxy(LCvxReachability):
         # Problem parameters
         dt = tf / self.N
         t = np.array([i * dt for i in range(self.N + 1)])
-        alt = cp.Parameter(nonneg=True, name="alt")
-        vx = cp.Parameter(name="vx")
-        vz = cp.Parameter(name="vz")
-        z_mass = cp.Parameter(nonneg=True, name="z_mass")  # log(mass) at the initial time
-        c = cp.Parameter(2, name="c")  # maximum range direction in x-z plane
+        alt0 = cp.Parameter(nonneg=True, name="alt")
+        vx0 = cp.Parameter(name="vx")
+        vz0 = cp.Parameter(name="vz")
+        z_mass0 = cp.Parameter(nonneg=True, name="z_mass")  # log(mass) at the initial time
+        c = cp.Parameter(2, name="c")  # maximum range direction in x-y plane
         c_xc_arr = cp.Parameter((2, 2), name="c_xc_arr")  # product of center state and maximum state direction
 
         # Problem variables
@@ -456,7 +454,7 @@ class LCvxReachabilityRxy(LCvxReachability):
         r, v, z, u, sigma = self.recover_variables(X, U)
 
         # Problem constraints
-        x0 = [0.0, 0.0, alt, vx, 0.0, vz, z_mass]
+        x0 = [0.0, 0.0, alt0, vx0, 0.0, vz0, z_mass0]
         cstr = self._lcvx_constraints(
             params=(None, tf, dt, t, None), vars=(r, v, z, u, sigma)
         )
@@ -479,17 +477,16 @@ class LCvxReachabilityRxy(LCvxReachability):
 
 
 class LCvxControllability(LCvxProblem):
-    """Controllability problem class; given a bounded terminal state set, compute the feasible initial state set.""" 
+    """Controllability problem class; given a bounded terminal state set, compute the feasible initial state set."""
 
-    def __init__(self, rocket: Rocket, N: int):
+    def __init__(self, lander: Lander, N: int):
         """Landing problem for computing a controllable set.
 
         Args:
-            rocket: Rocket model.
+            lander: lander model.
             N: Number of discretization points.
-            alt0: Initial altitude.
         """
-        super().__init__(rocket, N)
+        super().__init__(lander, N)
     
     def problem(
         self,
@@ -507,6 +504,7 @@ class LCvxControllability(LCvxProblem):
             tf: Final time.
             x0_paramed: If True, then the initial state are parameters. Default is True for altitude.
             c_paramed: If True, then the maximum state direction is a parameter. Default is True.
+            xc_paramed: If True, then the center state is a parameter. Default is False.
             directional_cstr: Directional constraints for each state.
             xc: Center state from which range is maximized. Shape: (7,) for x, y, z, vx, vy, vz, log(mass).
         """
@@ -597,10 +595,11 @@ class LCvxControllability(LCvxProblem):
         cstr.append(z[-1] >= xf_min[6])  # log(mass)
         cstr.append(z[-1] <= xf_max[6])
         cstr.append(
-            z[-1] >= np.log(self.rocket.mdry)
+            z[-1] >= np.log(self.lander.mdry)
         )  # final log(mass) >= log(dry mass)
         
         # Initial conditions
+        cstr.append(z[0] <= np.log(self.lander.mwet))  # initial log(mass) <= log(wet mass)
         if x0_paramed is not None:
             j = 0
             for i, paramed in enumerate(x0_paramed):
@@ -620,8 +619,8 @@ class LCvxControllability(LCvxProblem):
 class LcVxControllabilityVxz(LCvxControllability):
     """Controllability problem class for velocity in x-z plane."""
 
-    def __init__(self, rocket: Rocket, N: int):
-        super().__init__(rocket, N)
+    def __init__(self, lander: Lander, N: int):
+        super().__init__(lander, N)
 
     def problem(self, xf_bounds: Tuple[np.ndarray], tf: float):
         """Define the reachability problem.
@@ -632,7 +631,7 @@ class LcVxControllabilityVxz(LCvxControllability):
         # Problem parameters
         dt = tf / self.N
         t = np.array([i * dt for i in range(self.N + 1)])
-        alt = cp.Parameter(nonneg=True, name="alt")
+        alt0 = cp.Parameter(nonneg=True, name="alt")
         z_mass = cp.Parameter(nonneg=True, name="z_mass")  # log(mass) at the initial time
         c = cp.Parameter(2, name="c")
         c_xc_arr = cp.Parameter((2, 2), name="c_xc_arr")  # product of center state and maximum state direction
@@ -649,10 +648,10 @@ class LcVxControllabilityVxz(LCvxControllability):
             params=(None, tf, dt, t, None), vars=(r, v, z, u, sigma)
         )
         cstr += self._boundary_cstr(
-            vars=(r, v, z, u, sigma), 
-            xf_bounds=xf_bounds, 
-            x0_paramed=[False, False, True, False, False, False, True], 
-            x0=[alt, z_mass])
+            vars=(r, v, z, u, sigma),
+            xf_bounds=xf_bounds,
+            x0_paramed=[False, False, True, False, False, False, True],
+            x0=[alt0, z_mass])
 
         # Problem objective
         obj = cp.Maximize(c[0] * v[0, 0] - c_xc_arr[0, 0] + c[1] * v[2, 0] - c_xc_arr[1, 1])
