@@ -161,7 +161,6 @@ class ReachSteering(MyUDP):
         """
         return -np.ones(3 * self.N), np.ones(3 * self.N)
 
-    def
 
 
 @jit(nopython=True)
