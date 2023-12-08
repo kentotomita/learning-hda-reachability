@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import sys
 sys.path.append('../')
-from src.reachsteering import MinFuelCtrl, MinFuelCtrl2
+from src.reachsteering import MinFuelCtrl, MinFuelStateCtrl
 from src.visualization import *
 import src.lcvx as lc
 
@@ -48,12 +48,18 @@ def main():
         x0 = np.array([0, 0, alt, -20.0, 0, -45.0, mass])
 
         X, U = solve_lcvx(x0, tf, lander, N)
-        x0_udp = U.flatten() / (lander.MU * lander.LU / lander.TU ** 2)
 
-        udp = MinFuelCtrl2(lander, N, x0, tf, grad_implemented=False)
-        x0_udp = udp.construct_x(U)
+        ctrl_only = True
+        give_initial = True
+
+
+        if ctrl_only:
+            udp = MinFuelCtrl(lander, N, x0, tf, grad_implemented=False)
+            x0_udp = udp.construct_x(U)
+        else:
+            udp = MinFuelStateCtrl(lander, N, x0, tf, grad_implemented=False)
+            x0_udp = udp.construct_x(X, U)
         prob = pg.problem(udp)
-
 
         uda = snopt7(screen_output=False, library="C:/Users/ktomita3/libsnopt7/snopt7.dll", minor_version=7)
         ftol = 1e-4
@@ -65,11 +71,10 @@ def main():
         #uda = pg.ipopt()
         algo = pg.algorithm(uda)
 
-        algo.set_verbosity(1)
+        algo.set_verbosity(100)
         
         print(algo)
 
-        give_initial = False
         if give_initial:
             pop = pg.population(prob, 0)
             pop.push_back(x0_udp)
