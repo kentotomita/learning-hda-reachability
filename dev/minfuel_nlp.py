@@ -19,7 +19,7 @@ def main():
         tf = 60.0
         alt = 1500.0
         mass = 1800.0
-        x0 = np.array([0, 0, alt, -30.0, 0, -55.0, np.log(mass)])
+        x0 = np.array([0, 50, alt, -30.0, 0, -55.0, np.log(mass)])
 
         lcvx = lc.LCvxMinFuel(
                 lander=lander,

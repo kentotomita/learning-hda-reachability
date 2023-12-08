@@ -37,7 +37,10 @@ class MinFuel():
         r, v, z = _propagate_state(self.x0, u, self.N, self.dt, self.lander.g, self.lander.alpha)
 
         # Compute constraints
-        cstr_eq, cstr_ineq = _get_cstr(r, v, z, u, self.N, self.lander.rho1, self.lander.rho2, self.lander.pa, self.lander.gsa, self.lander.vmax)
+        cstr_eq = []
+        cstr_eq += [r[-1, 2]]  # Final altitude = 0
+        cstr_eq += list(v[-1, :])  # Final velocity = 0
+        cstr_ineq = _get_cstr(r, v, u, self.N, self.lander.rho1, self.lander.rho2, self.lander.pa, self.lander.gsa, self.lander.vmax)
 
         # Compute fitness
         obj = _minfuel(u, self.N, self.lander.alpha, self.dt)
@@ -82,6 +85,8 @@ class MinFuelStateCtrl():
         self.tgo = tgo
         self.dt = tgo / N
         self.t = np.linspace(0, tgo, N + 1)
+
+        assert x0[6] > lander.mdry, "Initial mass must be greater than dry mass"
         
         # Scaling factors for normalization
         self.LU = lander.LU
@@ -104,16 +109,16 @@ class MinFuelStateCtrl():
         # Unpack decision vector
         r_ = x[:3 * (self.N + 1)].reshape(self.N + 1, 3)
         v_ = x[3 * (self.N + 1):6 * (self.N + 1)].reshape(self.N + 1, 3)
-        z_ = x[6 * (self.N + 1):7 * (self.N + 1)]
+        m_ = x[6 * (self.N + 1):7 * (self.N + 1)]
         u_ = x[7 * (self.N + 1):].reshape(self.N, 3)
-        return r_, v_, z_, u_
+        return r_, v_, m_, u_
     
-    def dimensionalize(self, r_, v_, z_, u_):
+    def dimensionalize(self, r_, v_, m_, u_):
         r = r_ * self.LU
         v = v_ * self.LU / self.TU
-        z = z_ * self.MU
+        m = m_ * self.MU
         u = u_ * self.MU * self.LU / self.TU ** 2
-        return r, v, z, u
+        return r, v, m, u
         
     def fitness(self, x):
         """Compute fitness for given decision vector x
@@ -122,40 +127,110 @@ class MinFuelStateCtrl():
             x (np.array-like): decision vector
         """
         # Unpack decision vector
-        r_, v_, z_, u_ = self.unpack_decision_vector(x)
+        r_, v_, m_, u_ = self.unpack_decision_vector(x)
 
         # Dynamics constraints
-        cstr_eq_dyn = _dynamics_cstr(r_, v_, z_, u_, self.dt / self.TU, self.g_, self.alpha_, self.N)
-
+        cstr_eq_dyn = self._dynamics_cstr(r_, v_, m_, u_, self.dt / self.TU, self.g_, self.alpha_, self.N)
+        
         # Compute constraints
-        cstr_eq, cstr_ineq = _get_cstr(r_, v_, z_, u_, self.N, self.rho1_, self.rho2_, self.lander.pa, self.lander.gsa, self.vmax_)
+        cstr_ineq = _get_cstr(r_, v_, u_, self.N, self.rho1_, self.rho2_, self.lander.pa, self.lander.gsa, self.vmax_)
 
         # Compute fitness
         obj = _minfuel(u_, self.N, self.alpha_, self.dt / self.TU)
-        return [obj] + list(cstr_eq_dyn) + list(cstr_eq) + list(cstr_ineq)
+
+        return [obj] + list(cstr_eq_dyn) + list(cstr_ineq)
         
     def get_nec(self):
         """Return number of equality constraints"""
-        return 4 + 7 * self.N
+        n_eq_dyn = 7 * self.N
+        return n_eq_dyn
 
     def get_nic(self):
         """Return number of inequality constraints"""
-        return 5 * self.N + 3
+        n_ineq_operation = 5 * self.N + 3
+        return n_ineq_operation
 
     def get_bounds(self):
-        """Return decision vector bounds
+        """Return decision vector bounds, Boundary constraints are imposed here.
 
         Return:
             (tuple): tuple containing:
                 lb (np.array-like): lower bound
                 ub (np.array-like): upper bound
         """
-        n_dim = 7 * (self.N + 1) + 3 * self.N
-        return -np.ones(n_dim) * 3, np.ones(n_dim) * 3
+        r_min = -np.ones((self.N + 1, 3))
+        r_max = np.ones((self.N + 1, 3))
+        r_min[:, 2] = 0.0
+        r_max[:, 2] = 2.0
 
-    def gradient(self, x):
-        """Compute gradient of fitness function for given decision vector x"""
-        return pg.estimate_gradient_h(lambda x: self.fitness(x), x)
+        v_min = -np.ones((self.N + 1, 3))
+        v_max = np.ones((self.N + 1, 3))
+
+        m_min = np.ones(self.N + 1) * self.lander.mdry / self.MU
+        m_max = np.ones(self.N + 1)
+
+        u_max = np.ones((self.N, 3))
+        u_min = np.zeros((self.N, 3))
+        thrust_max = self.lander.rho2 / (self.MU * self.LU / self.TU ** 2)
+        thrust_min = self.lander.rho1 / (self.MU * self.LU / self.TU ** 2)
+        u_min[:, :2] = -thrust_max * np.sin(self.lander.pa)
+        u_max[:, :2] = thrust_max * np.sin(self.lander.pa)
+        u_min[:, 2] = thrust_min * np.cos(self.lander.pa)
+        u_max[:, 2] = thrust_max
+
+        # Boundary constraints
+        r0_ = self.x0[:3] / self.LU
+        v0_ = self.x0[3:6] / self.LU * self.TU
+        m0_ = self.x0[6] / self.MU
+        # Initial state
+        r_min[0, :] = r0_
+        r_max[0, :] = r0_
+        v_min[0, :] = v0_
+        v_max[0, :] = v0_
+        m_min[0] = m0_
+        m_max[0] = m0_
+        # Final state
+        r_min[-1, 2] = 0.0
+        r_max[-1, 2] = 0.0
+        v_min[-1, :] = 0.0
+        v_max[-1, :] = 0.0
+
+        lb = np.hstack((r_min.flatten(), v_min.flatten(), m_min.flatten(), u_min.flatten()))
+        ub = np.hstack((r_max.flatten(), v_max.flatten(), m_max.flatten(), u_max.flatten()))
+        return lb, ub
+
+    #def gradient(self, x):
+    #    """Compute gradient of fitness function for given decision vector x"""
+    #    return pg.estimate_gradient_h(lambda x: self.fitness(x), x)
+
+    def _dynamics_cstr(self, r, v, m, u, dt, g, alpha, N):
+        """Equality constraints for the dynamics of the lander
+        
+        Args:
+            r (np.array): position
+            v (np.array): velocity
+            m (np.array): mass
+            u (np.array): control
+            dt (float): time step
+            g (np.array): gravity
+            alpha (float): fuel consumption rate
+            N (int): number of time steps
+
+        Returns:
+            np.array: equality constraints, (N * 7,)
+        """
+        cstr_eq = np.zeros(N * 7)
+        for i in range(N):
+            a = u[i] / m[i] + g
+            for j in range(3):
+                # Position dynamics
+                cstr_eq[i * 7 + j] = r[i, j] + dt * v[i, j] + dt ** 2 / 2.0 * a[j] - r[i + 1, j]
+                # Velocity dynamics
+                cstr_eq[i * 7 + 3 + j] = v[i, j] + dt * a[j] - v[i + 1, j]
+            # Mass dynamics
+            cstr_eq[i * 7 + 6] = (m[i] - dt * alpha * np.linalg.norm(u[i])) - m[i + 1]
+
+        return cstr_eq
     
 
     
@@ -286,14 +361,10 @@ def _propagate_state(x0, u, N, dt, g, alpha):
     
     return r, v, z
 
-@jit(nopython=True)
-def _get_cstr(r, v, z, u, N, rho1, rho2, pa, gsa, vmax):
-    cstr_eq = np.zeros(4)
-    cstr_ineq = np.zeros(5 * N + 3)
 
-    # Equality constraints
-    cstr_eq[0] = r[N, 2]  # Final altitude = 0
-    cstr_eq[1:] = v[N, :]  # Final velocity = 0
+@jit(nopython=True)
+def _get_cstr(r, v, u, N, rho1, rho2, pa, gsa, vmax):
+    cstr_ineq = np.zeros(5 * N + 3)
 
     # Inequality constraints
     i_ieq = 0
@@ -318,7 +389,7 @@ def _get_cstr(r, v, z, u, N, rho1, rho2, pa, gsa, vmax):
         cstr_ineq[i_ieq] = np.linalg.norm(v[i]) - vmax
         i_ieq += 1
 
-    return cstr_eq, cstr_ineq
+    return cstr_ineq
 
 @jit(nopython=True)
 def _minfuel(u, N, alpha, dt):

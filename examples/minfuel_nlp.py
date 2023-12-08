@@ -18,7 +18,7 @@ def main():
         tf = 60.0
         alt = 1500.0
         mass = 1800.0
-        x0 = np.array([0, 0, alt, -30.0, 0, -55.0, np.log(mass)])
+        x0 = np.array([0, 0, alt, -20.0, 0, -55.0, np.log(mass)])
 
         lcvx = lc.LCvxMinFuel(
                 lander=lander,
@@ -35,36 +35,39 @@ def main():
         U_sol = sol["U"]
         r, v, z, u, sigma = lcvx.recover_variables(X_sol, U_sol)
         m = np.exp(z)
-        X = np.hstack((r.T, v.T, m.reshape(-1, 1)))
-        U = u.T * m[:-1].reshape(-1, 1)
+        u = u.T * m[:-1].reshape(-1, 1)
+        r_ = r.T / lander.LU
+        v_ = v.T / (lander.LU / lander.TU)
+        m_ = m.T / lander.MU
+        u_ = u / (lander.MU * lander.LU / lander.TU ** 2)
+        x_udp_0 = np.hstack((r_.flatten(), v_.flatten(), m_.flatten(), u_.flatten()))
 
+        x0[6] = mass
         udp = MinFuelStateCtrl(lander, N, x0, tf)
         prob = pg.problem(udp)
 
-        uda = snopt7(screen_output=True, library="C:/Users/ktomita3/libsnopt7/snopt7.dll", minor_version=7)
+        uda = snopt7(screen_output=False, library="C:/Users/ktomita3/libsnopt7/snopt7.dll", minor_version=7)
         uda.set_integer_option("Major Iteration Limit", 1000)
+        uda.set_numeric_option("Major optimality tolerance", 1e-4)
+        uda.set_numeric_option("Major feasibility tolerance", 1E-6)
         #uda = pg.ipopt()
         algo = pg.algorithm(uda)
 
-        #algo.extract(snopt7).set_integer_option("Major Iteration Limit", 1000)
-        #algo.extract(snopt7).set_numeric_option("Major feasibility tolerance", 1E-10)
-        #algo.set_verbosity(1)
+        algo.set_verbosity(100)
 
         print(algo)
 
-        pop = pg.population(prob, 1)
-        #x_udp_0 = np.hstack((X.flatten() / lander.LU, U.flatten() / (lander.MU * lander.LU / lander.TU ** 2)))
-        #print(f"{x_udp_0.shape} = ({N+1}*7 + {N}*3,)")
-        #pop.push_back(x_udp_0)
+        pop = pg.population(prob, 0)
+        pop.push_back(x_udp_0)
         print(pop)
 
         result = algo.evolve(pop)
         print(result)
 
-        r_, v_, z_, u_ = udp.unpack_decision_vector(result.champion_x)
-        r, v, z, U = udp.dimensionalize(r_, v_, z_, u_)
+        r_, v_, m_, u_ = udp.unpack_decision_vector(result.champion_x)
+        r, v, m, U = udp.dimensionalize(r_, v_, m_, u_)
 
-        X = np.hstack((r, v, np.exp(z).reshape(-1, 1)))
+        X = np.hstack((r, v, m.reshape(-1, 1)))
         t = np.linspace(0, tf, N + 1)
         # Plot results
         plot_3sides(t[:-1], X, U, uskip=1, gsa=lander.gsa)
