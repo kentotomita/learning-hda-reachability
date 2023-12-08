@@ -6,6 +6,206 @@ from numba import jit, float64
 from ..landers import Lander
 
 
+class Pdl:
+    """Base class for powered descent and landing."""
+
+    def __init__(self, lander: Lander, N: int, x0: np.ndarray, tgo: float, 
+                 grad_implemented: bool=False, normalize: bool=True):
+        """Initialize the problem
+        
+        Args:
+            lander (lander): lander model
+            x0 (np.array-like): initial state; [x, y, z, vx, vy, vz, m]
+            tgo (float): time-to-go
+            grad_implemented (bool): whether gradient is implemented 
+            normalize (bool): whether to normalize the problem
+        """
+        self.lander = lander
+        self.N = N
+        self.x0 = x0
+        dt = tgo / N
+
+        # Check initial condition
+        assert tgo > 0, "Time-to-go must be positive"
+        assert x0[6] > lander.mdry and x0[6] < lander.mwet, "Initial mass must be between dry and wet mass"
+
+        # Gradient implementation
+        self.grad_implemented = grad_implemented
+        if grad_implemented:
+            self.gradient = self._gradient
+
+        # Scaling factors for normalization
+        if normalize:
+            self.LU = lander.LU  # length unit
+            self.TU = lander.TU  # time unit
+            self.MU = lander.MU  # mass unit
+        else:
+            self.LU = 1.0
+            self.TU = 1.0
+            self.MU = 1.0
+
+        # normalized parameters
+        self.dt_ = dt / self.TU  # dt [s]
+        self.alpha_ = lander.alpha / (self.TU / self.LU)  # alpha [s/m]
+        self.rho1_ = lander.rho1 / (self.MU * self.LU / self.TU ** 2)  # rho1 [kg m/s^2]
+        self.rho2_ = lander.rho2 / (self.MU * self.LU / self.TU ** 2)  # rho2 [kg m/s^2]
+        self.vmax_ = lander.vmax / (self.LU / self.TU)  # vmax [m/s]
+        self.g_ = lander.g / (self.LU / self.TU ** 2)  # g [m/s^2]
+
+        # normalize initial state
+        self.x0_ = np.zeros(7)
+        self.x0_[:3] = x0[:3] / self.LU
+        self.x0_[3:6] = x0[3:6] / (self.LU / self.TU)
+        self.x0_[6] = x0[6] / self.MU
+
+    def _gradient(self, x):
+        """Compute gradient of fitness function for given decision vector x"""
+        return pg.estimate_gradient_h(lambda x: self.fitness(x), x)
+    
+
+class PdlCtrl(Pdl):
+    """Base class for powered descent and landing with control sequence as decision variable."""
+
+    def __init__(self, lander: Lander, N: int, x0: np.ndarray, tgo: float, 
+                 grad_implemented: bool=False, normalize: bool=True):
+        """Initialize the problem
+        
+        Args:
+            lander (lander): lander model
+            x0 (np.array-like): initial state; [x, y, z, vx, vy, vz, m]
+            tgo (float): time-to-go
+            grad_implemented (bool): whether gradient is implemented 
+            normalize (bool): whether to normalize the problem
+        """
+        super().__init__(lander, N, x0, tgo, grad_implemented, normalize)
+
+        # gamma is the angle between the thrust vector and the vertical axis
+        # phi is the angle between the thrust vector projected on the horizontal plane and the x-axis
+        # The following bounds are used for normalize decision vector in the range [0, 1]
+        self.gamma_lb = 0.0
+        self.gamma_ub = self.lander.pa
+        self.phi_lb = -np.pi
+        self.phi_ub = np.pi
+
+    def construct_x(self, u):
+        """Construct decision vector given control sequence
+        
+        Args:
+            u (np.array-like): control sequence, (N, 3)
+
+        Returns:
+            x (np.array): decision vector, (3 * N,)
+        """
+        u_ = u / (self.MU * self.LU / self.TU ** 2)
+        u_norm = np.linalg.norm(u_, axis=1)
+        throttle = (u_norm - self.rho1_) / (self.rho2_ - self.rho1_)
+        gamma = np.arccos(u_[:, 2] / u_norm)
+        phi = np.arctan2(u_[:, 1], u_[:, 0])
+
+        print(u.shape, u_.shape, throttle.shape, gamma.shape, phi.shape)
+
+        # normalize decision vector
+        gamma_ = (gamma - self.gamma_lb) / (self.gamma_ub - self.gamma_lb)
+        phi_ = (phi - self.phi_lb) / (self.phi_ub - self.phi_lb)
+        x = np.hstack((throttle, gamma_, phi_))
+        return x
+
+    def construct_thrust(self, x):
+        """Construct thrust vector from decision vector
+
+        Args:
+            x (np.array-like): decision vector
+        """
+        # unpack decision vector
+        throttle = x[: self.N]
+        gamma_ = x[self.N: 2 * self.N]
+        phi_ = x[2 * self.N:]
+
+        # recover decision vector
+        gamma = self.gamma_lb + (self.gamma_ub - self.gamma_lb) * gamma_
+        phi = self.phi_lb + (self.phi_ub - self.phi_lb) * phi_
+
+        # construct normalized thrust vector
+        u_ = np.zeros((self.N, 3))
+        u_norm = self.rho1_ + (self.rho2_ - self.rho1_) * throttle
+        u_[:, 0] = u_norm * np.sin(gamma) * np.cos(phi)
+        u_[:, 1] = u_norm * np.sin(gamma) * np.sin(phi)
+        u_[:, 2] = u_norm * np.cos(gamma)
+        return u_
+
+    def construct_trajectory(self, x):
+        u_ = self.construct_thrust(x)
+        r_, v_, m_ = _propagate_state(self.x0_, u_, self.N, self.dt_, self.g_, self.alpha_)
+
+        u = u_ * self.MU * self.LU / self.TU ** 2
+        r = r_ * self.LU
+        v = v_ * self.LU / self.TU
+        m = m_ * self.MU
+        return r, v, m, u
+
+    def get_bounds(self):
+        """Return decision vector bounds
+
+        Return:
+            (tuple): tuple containing:
+                lb (np.array-like): lower bound
+                ub (np.array-like): upper bound
+        """
+        return np.zeros(3 * self.N), np.ones(3 * self.N)
+
+
+class MinFuelCtrl2(PdlCtrl):
+    """Minimum Fuel problem where control sequence is decision variable"""
+
+    def __init__(self, lander: Lander, N: int, x0: np.ndarray, tgo: float,
+                 grad_implemented: bool=False, normalize: bool=True):
+        """Initialize the problem
+        
+        Args:
+            lander (lander): lander model
+            x0 (np.array-like): initial state; [x, y, z, vx, vy, vz, m]
+            tgo (float): time-to-go
+            grad_implemented (bool): whether gradient is implemented 
+            normalize (bool): whether to normalize the problem
+        """
+        super().__init__(lander, N, x0, tgo, grad_implemented, normalize)
+
+    def fitness(self, x):
+        """Compute fitness for given decision vector x
+
+        Args:
+            x (np.array-like): decision vector
+        """
+        u_ = self.construct_thrust(x)
+
+        # Propagate dynamics
+        r_, v_, m_ = _propagate_state(self.x0_, u_, self.N, self.dt_, self.g_, self.alpha_)
+
+        # Terminal state constraints
+        cstr_eq = [r_[-1, 2]]  # Final altitude = 0
+        cstr_eq += list(v_[-1, :])  # Final velocity = 0
+
+        cstr_ineq_terminal = [self.lander.mdry / self.MU - m_[-1]]  # Dry mass <= final mass
+
+        # Operational constraints
+        cstr_ineq = _get_cstr(r_, v_, u_, self.N, self.rho1_, self.rho2_, self.lander.pa, self.lander.gsa, self.vmax_)
+
+        # Compute fitness
+        obj = _minfuel(u_, self.N, self.alpha_, self.dt_)
+        return [obj] + list(cstr_eq) + cstr_ineq_terminal + list(cstr_ineq)
+        
+    def get_nec(self):
+        """Return number of equality constraints"""
+        n_softlanding = 4  # final altitude and velocity are zero
+        return n_softlanding
+
+    def get_nic(self):
+        """Return number of inequality constraints"""
+        n_operation = 2 * self.N + 1  # constraints from _get_cstr
+        n_terminal = 1  # Dry mass <= final mass
+        return n_operation + n_terminal
+
+
 class MinFuel():
     """Minimum Fuel problem where control sequence is decision variable"""
 
@@ -136,7 +336,7 @@ class MinFuelCtrl():
         cstr_ineq_terminal = [self.lander.mdry - m_[-1]]  # Dry mass <= final mass
 
         # Operational constraints
-        cstr_ineq = _get_cstr(r_, v_, u_, self.N, self.rho1_, self.rho2_, self.lander.pa, self.lander.gsa, self.vmax_)
+        cstr_ineq = _get_cstr_old(r_, v_, u_, self.N, self.rho1_, self.rho2_, self.lander.pa, self.lander.gsa, self.vmax_)
 
         # Compute fitness
         obj = _minfuel(u_, self.N, self.alpha_, self.dt_)
@@ -431,6 +631,27 @@ def _propagate_state(x0, u, N, dt, g, alpha):
 
 @jit(nopython=True)
 def _get_cstr(r, v, u, N, rho1, rho2, pa, gsa, vmax):
+    cstr_ineq = np.zeros(2 * N + 1)
+
+    # Inequality constraints
+    i_ieq = 0
+
+    # Glide slope constraint
+    for i in range(N+1):
+        cstr_ineq[i_ieq] = np.linalg.norm(r[i, :2] - r[-1, :2]) * np.tan(gsa) - (r[i, 2] - r[-1, 2])
+        i_ieq += 1
+
+    # Velocity constraint
+    for i in range(N):
+        cstr_ineq[i_ieq] = np.linalg.norm(v[i]) - vmax
+        i_ieq += 1
+
+    return cstr_ineq
+
+
+#"""
+@jit(nopython=True)
+def _get_cstr_old(r, v, u, N, rho1, rho2, pa, gsa, vmax):
     cstr_ineq = np.zeros(5 * N + 1)
 
     # Inequality constraints
@@ -457,6 +678,7 @@ def _get_cstr(r, v, u, N, rho1, rho2, pa, gsa, vmax):
         i_ieq += 1
 
     return cstr_ineq
+#"""
 
 @jit(nopython=True)
 def _minfuel(u, N, alpha, dt):
