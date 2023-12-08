@@ -69,6 +69,106 @@ class MinFuel():
         return pg.estimate_gradient_h(lambda x: self.fitness(x), x)
     
 
+class MinFuelCtrl():
+    """Minimum Fuel problem where control sequence is decision variable"""
+
+    def __init__(self, lander, N, x0, tgo):
+        """Initialize the problem
+
+        Args:
+            lander (lander): lander (lander) model
+            x0 (np.array-like): initial state
+            tgo (float): time-to-go
+        """
+        self.lander = lander
+        self.N = N
+        self.x0 = x0
+        self.tgo = tgo
+        self.dt = tgo / N
+        self.t = np.linspace(0, tgo, N + 1)
+
+        assert x0[6] > lander.mdry, "Initial mass must be greater than dry mass"
+        
+        # Scaling factors for normalization
+        self.LU = lander.LU
+        self.TU = lander.TU
+        self.MU = lander.MU
+
+        # normalized parameters
+        self.dt_ = self.dt / self.TU  # dt [s]
+        self.alpha_ = lander.alpha / (self.TU / self.LU)  # alpha [s/m]
+        self.rho1_ = lander.rho1 / (self.MU * self.LU / self.TU ** 2)  # rho1 [kg m/s^2]
+        self.rho2_ = lander.rho2 / (self.MU * self.LU / self.TU ** 2)  # rho2 [kg m/s^2]
+        self.vmax_ = lander.vmax / (self.LU / self.TU)  # vmax [m/s]
+        self.g_ = lander.g / (self.LU / self.TU ** 2)  # g [m/s^2]
+
+        self.x0_ = np.zeros(7)
+        self.x0_[:3] = x0[:3] / self.LU
+        self.x0_[3:6] = x0[3:6] / (self.LU / self.TU)
+        self.x0_[6] = x0[6] / self.MU
+
+    def construct_trajectory(self, x):
+        u_ = x.reshape(self.N, 3)
+        r_, v_, m_ = _propagate_state(self.x0_, u_, self.N, self.dt_, self.g_, self.alpha_)
+
+        u = u_ * self.MU * self.LU / self.TU ** 2
+        r = r_ * self.LU
+        v = v_ * self.LU / self.TU
+        m = m_ * self.MU
+        return r, v, m, u
+        
+    def fitness(self, x):
+        """Compute fitness for given decision vector x
+
+        Args:
+            u_ (np.array-like): decision vector
+        """
+        u_ = x.reshape(self.N, 3)
+
+        # Propagate dynamics
+        r_, v_, m_ = _propagate_state(self.x0_, u_, self.N, self.dt_, self.g_, self.alpha_)
+
+        # Terminal state constraints
+        cstr_eq = []
+        cstr_eq += [r_[-1, 2]]  # Final altitude = 0
+        cstr_eq += list(v_[-1, :])  # Final velocity = 0
+
+        cstr_ineq_terminal = [self.lander.mdry - m_[-1]]  # Dry mass <= final mass
+
+        # Operational constraints
+        cstr_ineq = _get_cstr(r_, v_, u_, self.N, self.rho1_, self.rho2_, self.lander.pa, self.lander.gsa, self.vmax_)
+
+        # Compute fitness
+        obj = _minfuel(u_, self.N, self.alpha_, self.dt_)
+        return [obj] + list(cstr_eq) + cstr_ineq_terminal +  list(cstr_ineq)
+        
+    def get_nec(self):
+        """Return number of equality constraints"""
+        return 4
+
+    def get_nic(self):
+        """Return number of inequality constraints"""
+        n_operation = 5 * self.N + 1  # constraints from _get_cstr
+        n_terminal = 1  # Dry mass <= final mass
+        return n_operation + n_terminal
+
+    def get_bounds(self):
+        """Return decision vector bounds
+
+        Return:
+            (tuple): tuple containing:
+                lb (np.array-like): lower bound
+                ub (np.array-like): upper bound
+        """
+        u_max = np.zeros((self.N, 3))
+        u_min = np.zeros((self.N, 3))
+        u_min[:, :2] = -self.rho2_ * np.sin(self.lander.pa)
+        u_max[:, :2] = self.rho2_ * np.sin(self.lander.pa)
+        u_min[:, 2] = self.rho1_ * np.cos(self.lander.pa)
+        u_max[:, 2] = self.rho2_
+        return u_min.flatten(), u_max.flatten()
+    
+
 class MinFuelStateCtrl():
     """Minimum Fuel problem where state and control sequences are decision variables"""
     def __init__(self, lander: Lander, N: int, x0: np.ndarray, tgo: float):
@@ -231,7 +331,6 @@ class MinFuelStateCtrl():
             cstr_eq[i * 7 + 6] = (m[i] - dt * alpha * np.linalg.norm(u[i])) - m[i + 1]
 
         return cstr_eq
-    
 
     
 
@@ -303,68 +402,36 @@ class ReachSteering():
 
 
 @jit(nopython=True)
-def _dynamics(r, v, z, u, dt, g, alpha):
+def _dynamics(r, v, m, u, dt, g, alpha):
     dt22 = dt ** 2 / 2.0
-    mass = np.exp(z)
-    a = u / mass + g
+    a = u / m + g
 
     # Compute next state
     r_next = r + dt * v + dt22 * a
     v_next = v + dt * a
-    z_next = z - dt * alpha * np.linalg.norm(u) / mass
+    m_next = m - dt * alpha * np.linalg.norm(u)
 
-    return r_next, v_next, z_next
-
-@jit(nopython=True)
-def _dynamics_cstr(r, v, z, u, dt, g, alpha, N):
-    """Equality constraints for the dynamics of the lander
-    
-    Args:
-        r (np.array): position
-        v (np.array): velocity
-        z (np.array): log of mass
-        u (np.array): control
-        dt (float): time step
-        g (np.array): gravity
-        alpha (float): fuel consumption rate
-        N (int): number of time steps
-
-    Returns:
-        np.array: equality constraints, (N * 7,)
-    """
-    cstr_eq = np.zeros(N * 7)
-    for i in range(N):
-        mass = np.exp(z[i])
-        a = u[i] / mass + g
-        for j in range(3):
-            # Position dynamics
-            cstr_eq[i * 7 + j] = r[i, j] + dt * v[i, j] + dt ** 2 / 2.0 * a[j] - r[i + 1, j]
-            # Velocity dynamics
-            cstr_eq[i * 7 + 3 + j] = v[i, j] + dt * a[j] - v[i + 1, j]
-        # Mass dynamics
-        cstr_eq[i * 7 + 6] = (z[i] - dt * alpha * np.linalg.norm(u[i]) / mass) - z[i + 1]
-
-    return cstr_eq
+    return r_next, v_next, m_next
 
 @jit(nopython=True)
 def _propagate_state(x0, u, N, dt, g, alpha):
     r = np.zeros((N + 1, 3))
     v = np.zeros((N + 1, 3))
-    z = np.zeros(N + 1)
+    m = np.zeros(N + 1)
 
     r[0] = x0[:3]
     v[0] = x0[3:6]
-    z[0] = x0[6]
+    m[0] = x0[6]
 
     for i in range(N):
-        r[i + 1], v[i + 1], z[i + 1] = _dynamics(r[i], v[i], z[i], u[i], dt, g, alpha)
+        r[i + 1], v[i + 1], m[i + 1] = _dynamics(r[i], v[i], m[i], u[i], dt, g, alpha)
     
-    return r, v, z
+    return r, v, m
 
 
 @jit(nopython=True)
 def _get_cstr(r, v, u, N, rho1, rho2, pa, gsa, vmax):
-    cstr_ineq = np.zeros(5 * N + 3)
+    cstr_ineq = np.zeros(5 * N + 1)
 
     # Inequality constraints
     i_ieq = 0
