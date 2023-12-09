@@ -1,8 +1,7 @@
-name: pygmo2
+name: pygmo3
 channels:
   - conda-forge
   - numba
-  - pytorch
 dependencies:
   - pygmo
   - pygmo_plugins_nonfree

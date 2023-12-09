@@ -3,6 +3,9 @@
 import numpy as np
 import pygmo as pg
 from numba import jit, float64
+from torch.nn import Module
+import torch
+from .objectives import ic2mean_safety_npy
 from ..landers import Lander
 
 
@@ -23,7 +26,8 @@ class Pdl:
         self.lander = lander
         self.N = N
         self.x0 = x0
-        dt = tgo / N
+        self.tgo = tgo
+        self.dt = tgo / N
 
         # Check initial condition
         assert tgo > 0, "Time-to-go must be positive"
@@ -45,7 +49,7 @@ class Pdl:
             self.MU = 1.0
 
         # normalized parameters
-        self.dt_ = dt / self.TU  # dt [s]
+        self.dt_ = self.dt / self.TU  # dt [s]
         self.alpha_ = lander.alpha / (self.TU / self.LU)  # alpha [s/m]
         self.rho1_ = lander.rho1 / (self.MU * self.LU / self.TU ** 2)  # rho1 [kg m/s^2]
         self.rho2_ = lander.rho2 / (self.MU * self.LU / self.TU ** 2)  # rho2 [kg m/s^2]
@@ -384,66 +388,64 @@ class MinFuelStateCtrl(PdlStateCtrl):
         return n_operation
 
 
-class ReachSteering():
-    """Reachability steering problem"""
-
-    def __init__(self, lander, N, x0, tgo, nn_reach):
+class ReachSteeringCtrl(MinFuelCtrl):
+    """Reachability steering problem where control sequence is decision variable"""
+    def __init__(self, lander: Lander, N: int, x0: np.ndarray, tgo: float,
+                 sfmap: torch.Tensor, nn_reach: Module, kmax: int, border_sharpness: float,
+                 grad_implemented: bool=False, normalize: bool=True):
         """Initialize the problem
-
+        
         Args:
-            lander (lander): lander (lander) model
-            x0 (np.array-like): initial state
+            lander (lander): lander model
+            x0 (np.array-like): initial state; [x, y, z, vx, vy, vz, m]
             tgo (float): time-to-go
-            nn_reach (torch.nn.Module): neural network model for reachable set evaluation
+            sfmap (np.array-like): safety map, [[x, y, safety], ...]]
+            nn_reach (torch.nn.Module): neural network model for reachability steering
+            kmax (int): time step at which reachable safety is maximized
+            border_sharpness (float): sharpness of the border of the safety map
+            grad_implemented (bool): whether gradient is implemented 
+            normalize (bool): whether to normalize the problem
         """
-        self.lander = lander
-        self.N = N
-        self.x0 = x0
-        self.tgo = tgo
+        super().__init__(lander, N, x0, tgo, grad_implemented, normalize)
+        self.kmax = kmax
+        self.sfmap = sfmap
         self.nn_reach = nn_reach
-        self.dt = tgo / N
-        self.t = np.linspace(0, tgo, N + 1)
+        self.border_sharpness = border_sharpness
 
-    def fitness(self, u_, return_obj=True):
+    def fitness(self, x):
         """Compute fitness for given decision vector x
 
         Args:
-            u_ (np.array-like): decision vector
+            x (np.array-like): decision vector
         """
-        # Unnormalize control sequence
-        u = u_.reshape(self.N, 3) * self.lander.rho2
+        u_ = self.construct_thrust(x)
 
         # Propagate dynamics
-        r, v, z = _propagate_state(self.x0, u, self.N, self.dt, self.lander.g, self.lander.alpha)
+        r_, v_, m_ = _propagate_state(self.x0_, u_, self.N, self.dt_, self.g_, self.alpha_)
 
-        # Compute constraints
-        cstr_eq, cstr_ineq = _get_cstr(r, v, z, u, self.N, self.lander.rho1, self.lander.rho2, self.lander.pa, self.lander.gsa, self.lander.vmax)
+        # Terminal state constraints
+        cstr_eq = [r_[-1, 2]]  # Final altitude = 0
+        cstr_eq += list(v_[-1, :])  # Final velocity = 0
 
-        if return_obj:
-            # Compute fitness
-            obj = _minfuel(u, self.N, self.lander.alpha, self.dt)
-            return [obj] + list(cstr_eq) + list(cstr_ineq)
-        else:
-            return list(cstr_eq) + list(cstr_ineq)
+        cstr_ineq_terminal = [self.lander.mdry / self.MU - m_[-1]]  # Dry mass <= final mass
 
-    def get_nec(self):
-        """Return number of equality constraints"""
-        return 4
+        # Operational constraints
+        cstr_ineq = _get_cstr(r_, v_, self.N, self.lander.gsa, self.vmax_)
 
-    def get_nic(self):
-        """Return number of inequality constraints"""
-        return 5 * self.N + 3
-
-    def get_bounds(self):
-        """Return decision vector bounds
-
-        Return:
-            (tuple): tuple containing:
-                lb (np.array-like): lower bound
-                ub (np.array-like): upper bound
-        """
-        return -np.ones(3 * self.N), np.ones(3 * self.N)
-
+        # Compute fitness
+        r = r_ * self.LU
+        v = v_ * self.LU / self.TU
+        m = m_ * self.MU
+        nn_input = np.hstack((r[self.kmax, :].flatten(), v[self.kmax, :].flatten(), m[self.kmax]))
+        safety, _ = ic2mean_safety_npy(
+            lander=self.lander,
+            x0=nn_input,
+            tgo=self.tgo-self.dt * self.kmax,
+            model=self.nn_reach,
+            sfmap=self.sfmap,
+            border_sharpness=self.border_sharpness,
+            )
+        return [-safety] + list(cstr_eq) + cstr_ineq_terminal + list(cstr_ineq)
 
 
 @jit(nopython=True)

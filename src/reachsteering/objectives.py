@@ -1,192 +1,120 @@
 """Objective functions and its utility funtions for reachability-aware guidance."""
 import torch
 import torch.nn as nn
-from torch import Tensor
+import numpy as np
+from numba import jit
 
-from .nn_reachset import get_nn_reachset_param, rot2d_torch
-from ..learning import FOV
-
-
-def u_2mean_safety(u_: Tensor, tgo_next: Tensor, x0: Tensor, dt: float, rocket: nn.Module, sfmap: Tensor, model: nn.Module, fov: Tensor, border_sharpness: float = 1.0):
-    """Return mean safety and reachable mask for the control sequence.
-
-    Args:
-        u_ (torch.Tensor): normalized control sequence, shape (N, 3)
-        tgo_next (torch.Tensor): time to go at the next waypoint, shape (N, )
-        x0 (torch.Tensor): initial state, shape (7, )
-        dt (float): time step
-        rocket (nn.Module): rocket model
-        sfmap (torch.Tensor): safety map, [[x, y, safety], ...]], shape (n, 3)
-
-    Returns:
-        mean_safety (torch.Tensor): mean safety
-        reachable_mask (torch.Tensor): reachable mask, shape (N, )
-    """
-    # propagate dynamics
-    x_next = u_2x(u_, x0, dt, rocket)
-    
-    # compute mean safety on the reachable safety map
-    mean_safety, reachable_mask = ic2mean_safety(x_next, tgo_next, model, sfmap, border_sharpness, fov)
-    
-    return mean_safety, reachable_mask, x_next
+from ..landers import Lander
+from ..learning import transform_ic, inverse_transform_reachsetparam
 
 
-def u_2x(u_: Tensor, x0: Tensor, dt: float, rocket: nn.Module):
-    """Propagate dynamics with the normalized control sequence.
-
-    Args:
-        u_ (torch.Tensor): normalized control sequence, shape (N, 3)
-        x0 (torch.Tensor): initial state, shape (7, )
-        dt (float): time step
-        rocket (nn.Module): rocket model
-    
-    Returns:
-        x (torch.Tensor): propagated states, shape (N, 7)
-    """
-    #x = x0
-    # copy x0 tensor to avoid in-place operation
-    x = x0.clone()
-    for i in range(u_.shape[0]):
-        u = inverse_transform_u(u_[i], torch.tensor(rocket.rho1), torch.tensor(rocket.rho2), torch.tensor(rocket.pa))
-        x = dynamics(x, u, dt, torch.tensor(rocket.g), torch.tensor(rocket.alpha))
-    return x
-
-
-def dynamics(x: torch.Tensor, u: torch.Tensor, dt: float, g: torch.Tensor, alpha: float):
-    """Compute next state under rocket dynamics. 
-
-    Args:
-        x (torch.Tensor): state, shape (7, ); [x, y, z, vx, vy, vz, log(mass)]
-        u (torch.Tensor): control, shape (3, )
-        dt (float): time step
-        g (torch.Tensor): gravity, shape (3, )
-        alpha (float): mass flow rate
-
-    Returns:
-        x_ (torch.Tensor): next state, shape (7, )
-    """
-    mass = torch.exp(x[6])
-    dt22 = dt **2 / 2.0
-    x_ = torch.zeros_like(x)
-    x_[:3] = x[:3] + dt * x[3:6] + dt22 * (u/mass + g)
-    x_[3:6] = x[3:6] + dt * (u/mass + g)
-    x_[6] = x[6] - dt * alpha * torch.norm(u) / mass  # dynamics of log(mass)
-    return x_
-
-
-def inverse_transform_u(u_: Tensor, rho1: Tensor, rho2: Tensor, pa_ub: Tensor):
-    """Inverse transform: from normalized thrust vector u_ to thrust vector u.
-
-    Args:
-        u_ (torch.Tensor): normalized control parameter, [0, 1], shape (3, )
-            - u_[0] is the throttle; normalized norm of u
-            - u_[1] is gimbal angle rate; angle from the z axis
-            - u_[2] is angle from the x axis
-        rho1 (Tensor): minimum thrust
-        rho2 (Tensor): maximum thrust
-        pa_ub (Tensor): maximum gimbal angle
-    
-    Returns:
-        torch.Tensor: control, shape (3, )
-    """
-    assert u_.shape == (3,), "Invalid shape of u_: {}".format(u_.shape)
-
-    eps = 1e-8
-    u = torch.zeros(3)
-
-    throttle = u_[0]
-    pa = u_[1] * pa_ub  # pa is determined by u_[1] and pa_ub
-    theta = u_[2] * torch.pi * 2  # gimbal is determined by u_[2] and 2*pi
-
-    u_norm = throttle * (rho2 - rho1) + rho1
-    u[2] = u_norm * torch.cos(pa)  # u_z is determined by u_norm and pa
-    u[0] = u_norm * torch.sin(pa) * torch.cos(theta)  # u_x
-    u[1] = u_norm * torch.sin(pa) * torch.sin(theta)  # u_y
-    return u
-
-
-def transform_u(u: Tensor, rho1: Tensor, rho2: Tensor, pa_ub: Tensor):
-    """Transform thrust vector u to normalized thrust vector u_.
-    
-    Args:
-        u (torch.Tensor): control, shape (3, )
-        rho1 (Tensor): minimum thrust
-        rho2 (Tensor): maximum thrust
-        pa_ub (Tensor): maximum gimbal angle
-    
-    """
-    u_ = torch.zeros(3)
-    u_norm = torch.norm(u)
-    u_xy_norm = torch.norm(u[:2])
-
-    u_[0] = (u_norm - rho1) / (rho2 - rho1)
-    u_[1] = torch.atan2(u_xy_norm, u[2]) / pa_ub
-    u_[2] = torch.atan2(u[1], u[0]) / (2 * torch.pi)
-    return u_
-
-
-def ic2mean_safety(x0: torch.Tensor, tgo: torch.Tensor, model: nn.Module, sfmap: torch.Tensor, border_sharpness=0.1, fov=FOV):
+def ic2mean_safety_npy(lander: Lander, x0: np.ndarray, tgo: float, model: nn.Module, sfmap: np.ndarray, border_sharpness=0.1):
     """Compute mean safety of the initial condition (x0, tgo) based on the soft landing reachable set.
 
     Args:
-        x0 (torch.Tensor): initial state
-        tgo (torch.Tensor): time to go
-        model (nn.Module): NN model
-        sfmap (torch.Tensor): safety map, [[x, y, safety], ...]], shape (n, 3)
-        border_sharpness (float, optional): sharpness of reachable set border. Defaults to 0.1.
-        fov (float, optional): field of view. Defaults to FOV.
-
-    Returns:
-        mean_safety (torch.Tensor): mean safety, shape (1, )
-        sfmap_reachable_mask (torch.Tensor): reachable safety map mask, shape (n, )
+        lander (Lander): lander model
+        x0 (np.ndarray): initial condition; [rx, ry, rz, vx, vy, vz, m]
+        tgo (float): time-to-go
+        model (nn.Module): neural network model
+        sfmap (np.ndarray): safety map
+        border_sharpness (float, optional): sharpness of the soft boundary. Defaults to 0.1.
     """
-
-    # compute reachable safety map
-    sfmap_reachable_mask = reachable_sfmap_soft(x0, tgo, model, sfmap, alpha=border_sharpness, fov=fov)
-
-    # compute mean safety
-    mean_safety = torch.sum(sfmap[:, 2] * sfmap_reachable_mask) / torch.sum(sfmap_reachable_mask + 1e-8)  # added epsilon for numerical stability
-
-    return mean_safety, sfmap_reachable_mask
-
-
-
-def reachable_sfmap_soft(x0: torch.Tensor, tgo: torch.Tensor, model: nn.Module, sfmap: torch.Tensor, alpha=1.0, fov=FOV):
-    """Compute safety map indices of reachable set with a soft boundary; differentiable.
-
-    Args:
-        x0 (torch.Tensor): initial state
-        tgo (torch.Tensor): time to go
-        model (nn.Module): NN model
-        sfmap (torch.Tensor): safety map, [[x, y, safety], ...]], shape (n, 3)
-        alpha (float, optional): soft boundary parameter. Defaults to 1.0.
-
-    Returns:
-        soft_mask (torch.Tensor): soft boundary mask, shape (n, )
-    """
-    eps = 1e-8  # small constant to prevent numerical instability
+    assert lander.mdry <= x0[6] <= lander.mwet, f"Invalid mass: {x0[6]}"
 
     # compute reachset parameters
-    xmin, xmax, ymax, x_ymax, rotation_angle, center = get_nn_reachset_param(x0, tgo, model, fov)
+    xmin, xmax, ymax, x_ymax, rotation_angle, center = get_nn_reachset_param(x0, tgo, model, lander.fov)
+
+    fov_radius = x0[2] * np.tan(lander.fov / 2)
+    xrange = (-fov_radius * 1.1 + center[0], fov_radius * 1.1 + center[0])
+    yrange = (center[1] - fov_radius * 1.1, center[1] + fov_radius * 1.1)
+
+    sfmap_cropped, crop_mask = crop_sfmap(sfmap, xrange, yrange)
+
     a1 = x_ymax - xmin
     a2 = xmax - x_ymax
     b = ymax
-    
-    # shift and rotate safety map to canonical coordinate of reachset
-    _xy = rot2d_torch(-rotation_angle) @ (sfmap[:, :2] - center).T
-    _xy = _xy.T
+
+    mean_safety, soft_mask_fov = _calc_mean_safety_npy(a1, a2, b, x_ymax, rotation_angle, center, sfmap_cropped, border_sharpness, fov_radius)
+
+    soft_mask = np.zeros_like(crop_mask).astype(np.float32)
+    soft_mask[crop_mask] = soft_mask_fov
+
+    return mean_safety, soft_mask
+
+
+def get_nn_reachset_param(x0: np.ndarray, tgo: float, model: nn.Module, fov: float):
+    """Compute parameters of soft landing reachable set using NN model"""
+
+    # unpack state
+    r, v, m = x0[:3], x0[3:6], x0[6]
+    z = np.log(m)
+    alt = r[2]
+    v_horiz = np.linalg.norm(v[:2])
+    v_horiz_angle = np.arctan2(v[1], v[0])
+
+    # prepare input
+    alt_, v_horiz_, v_vert_, z_, tgo_ = transform_ic(alt, v_horiz, v[2], z, tgo)
+    nn_input = torch.tensor([alt_, v_horiz_, v_vert_, z_, tgo_])
+    nn_input = nn_input.unsqueeze(0)
+
+    # check model dtype and convert input accordingly
+    model_dtype = next(model.parameters()).dtype
+    if model_dtype == torch.float64:
+        nn_input = nn_input.double()
+    elif model_dtype == torch.float32:
+        nn_input = nn_input.float()
+    else:
+        raise TypeError(f"Model dtype {model_dtype} not supported.")
+
+    # compute output (= reachset parameters)
+    nn_output = model(nn_input)
+    nn_output = nn_output.squeeze(0)
+    nn_output = nn_output.detach().numpy()
+    xmin_, xmax_, ymax_, x_ymax_ = nn_output
+    xmin, xmax, ymax, x_ymax = inverse_transform_reachsetparam(xmin_, xmax_, ymax_, x_ymax_, alt, fov=fov)
+
+    return xmin, xmax, ymax, x_ymax, v_horiz_angle, r[:2]
+
+@jit(nopython=True)
+def crop_sfmap(sfmap, xrange, yrange):
+    """Crop safety map to the specified range."""
+    xmin, xmax = xrange
+    ymin, ymax = yrange
+    mask = (sfmap[:, 0] > xmin) & (sfmap[:, 0] < xmax) & (sfmap[:, 1] > ymin) & (sfmap[:, 1] < ymax)
+    sfmap_cropped = sfmap[mask]
+    return sfmap_cropped, mask
+
+
+@jit(nopython=True)
+def _calc_mean_safety_npy(a1, a2, b, x_ymax, rotation_angle, center, sfmap, alpha, fov_radius):
+    """Compute mean safety of the initial condition (x0, tgo) based on the soft landing reachable set."""
+
+    eps = 1e-8  # small constant to prevent numerical instability
+
+    _xy = (sfmap[:, :2] - center) @ rot2d(-rotation_angle).T
     _x = _xy[:, 0]
     _y = _xy[:, 1]
 
     # compute soft boundary
-    mask0 = torch.sigmoid(alpha * (x_ymax - _x))  # 1 for x < x_ymax, 0 for x >= x_ymax
-    mask1 = torch.sigmoid(alpha * (1 - (_x - x_ymax)**2 / (a1**2 + eps) - _y**2 / (b**2 + eps)))
-    mask2 = torch.sigmoid(alpha * (1 - (_x - x_ymax)**2 / (a2**2 + eps) - _y**2 / (b**2 + eps)))
-    soft_mask = torch.max(torch.min(mask1, mask0), torch.min(mask2, 1 - mask0))
+    mask0 = 1.0 * (x_ymax > _x)   # 1 for x < x_ymax, 0 for x >= x_ymax
+    left_ellipse = (1 - (_x - x_ymax)**2 / (a1**2 + eps) - _y**2 / (b**2 + eps)) * mask0  # positive inside the ellipse, negative outside, 0 if x >= x_ymax
+    right_ellipse = (1 - (_x - x_ymax)**2 / (a2**2 + eps) - _y**2 / (b**2 + eps)) * (1 - mask0)  # positive inside the ellipse, negative outside, 0 if x < x_ymax
+    soft_mask = sigmoid(alpha * (left_ellipse + right_ellipse))
 
     # filter out points outside of the field of view
-    fov_radius = x0[2] * torch.tan(fov / 2)
-    fov_mask = torch.sigmoid(alpha * (fov_radius**2 - (_x)**2 - (_y)**2))  # center is at (0, 0) because we already shifted the safety map
-    soft_mask_fov = torch.min(soft_mask, fov_mask)
+    soft_mask_fov = soft_mask * ((_x)**2 - (_y)**2 <= fov_radius**2)  # center is at (0, 0) because we already shifted the safety map
 
-    return soft_mask_fov
+    mean_safety = np.sum(sfmap[:, 2] * soft_mask_fov) / np.sum(soft_mask_fov + 1e-8)  # added epsilon for numerical stability
+
+    return mean_safety, soft_mask_fov
+
+@jit(nopython=True)
+def rot2d(theta: np.ndarray):
+    """2D rotation matrix."""
+    return np.array(
+        [[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]]
+    )
+
+@jit(nopython=True)
+def sigmoid(x: np.ndarray):
+    return 1 / (1 + np.exp(-x))
