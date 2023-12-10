@@ -6,6 +6,64 @@ from PIL import Image
 from scipy.ndimage.filters import gaussian_filter
 
 
+class SafetyMap:
+    """Base class for safety map class."""
+    def __init__(self, x_range: Tuple, y_range: Tuple, npoints: int):
+        self.x_range = x_range
+        self.y_range = y_range
+        self.npoints = npoints
+
+    def get_sfmap(self, alt: float) -> np.ndarray:
+        """Get safety map at the specified altitude.
+
+        Args:
+            alt (float): altitude.
+
+        Returns:
+            np.ndarray: safety map; shape (N, M, 3); each row is [x, y, safety].
+        """
+        raise NotImplementedError
+    
+    def get_grid_sfmap(self, sfmap: np.ndarray) -> np.ndarray:
+        """Get safety map at the specified altitude.
+
+        Args:
+            alt (float): altitude.
+
+        Returns:
+            np.ndarray: safety map; shape (N, M); each row is [x, y, safety].
+        """
+        return sfmap.reshape(self.npoints, self.npoints, 3)
+    
+
+class StaticSafetyMap(SafetyMap):
+    """Static safety map class."""
+    
+    def __init__(self, x_range: Tuple, y_range: Tuple, npoints: int, sfmap: np.ndarray=None):
+        """Initialize static safety map.
+
+        Args:
+            npoints (int): number of points in x and y directions.
+        """
+        super().__init__(x_range, y_range, npoints)
+
+        if sfmap is None:
+            sfmap, _ = make_simple_sfmap(x_range, y_range, npoints)
+
+        self.sfmap = sfmap
+
+    def get_sfmap(self, alt: float) -> np.ndarray:
+        """Get safety map at the specified altitude.
+
+        Args:
+            alt (float): altitude.
+
+        Returns:
+            np.ndarray: safety map; shape (N, M, 3); each row is [x, y, safety].
+        """
+        return self.sfmap
+
+
 class DynamicSafetyMap:
     """Dynamic safety map class."""
 
@@ -15,7 +73,7 @@ class DynamicSafetyMap:
         Args:
             npoints (int): number of points in x and y directions.
         """
-        self.npoints = npoints
+        super().__init__(x_range, y_range, npoints)
 
         xmin, xmax = x_range
         ymin, ymax = y_range
@@ -84,17 +142,6 @@ class DynamicSafetyMap:
         sfmap_[:, :, 2] = sfmap
         sfmap = sfmap_.reshape(-1, 3)
         return sfmap
-    
-    def get_grid_sfmap(self, sfmap: np.ndarray) -> np.ndarray:
-        """Get safety map at the specified altitude.
-
-        Args:
-            alt (float): altitude.
-
-        Returns:
-            np.ndarray: safety map; shape (N, M); each row is [x, y, safety].
-        """
-        return sfmap.reshape(self.npoints, self.npoints, 3)
 
 
 def load_sfmap(
