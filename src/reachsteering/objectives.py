@@ -8,7 +8,8 @@ from ..landers import Lander
 from ..learning import transform_ic, inverse_transform_reachsetparam
 
 
-def ic2mean_safety_npy(lander: Lander, x0: np.ndarray, tgo: float, model: nn.Module, sfmap: np.ndarray, border_sharpness=0.1):
+def ic2mean_safety_npy(lander: Lander, x0: np.ndarray, tgo: float, model: nn.Module, sfmap: np.ndarray, border_sharpness=0.1,
+                       return_safest_point=False):
     """Compute mean safety of the initial condition (x0, tgo) based on the soft landing reachable set.
 
     Args:
@@ -25,8 +26,10 @@ def ic2mean_safety_npy(lander: Lander, x0: np.ndarray, tgo: float, model: nn.Mod
     xmin, xmax, ymax, x_ymax, rotation_angle, center = get_nn_reachset_param(x0, tgo, model, lander.fov)
 
     fov_radius = x0[2] * np.tan(lander.fov / 2)
-    xrange = (-fov_radius * 1.1 + center[0], fov_radius * 1.1 + center[0])
-    yrange = (center[1] - fov_radius * 1.1, center[1] + fov_radius * 1.1)
+    buffer = 0.25 * fov_radius
+    buffered_fov_radius = fov_radius + buffer
+    xrange = (-buffered_fov_radius + center[0], buffered_fov_radius + center[0])
+    yrange = (center[1] - buffered_fov_radius, center[1] + buffered_fov_radius) 
 
     sfmap_cropped, crop_mask = crop_sfmap(sfmap, xrange, yrange)
 
@@ -39,7 +42,15 @@ def ic2mean_safety_npy(lander: Lander, x0: np.ndarray, tgo: float, model: nn.Mod
     soft_mask = np.zeros_like(crop_mask).astype(np.float32)
     soft_mask[crop_mask] = soft_mask_fov
 
-    return mean_safety, soft_mask
+    if return_safest_point:
+        # get xy coordinate that maximizes sfmap_crop * soft_mask_fov
+        mask = soft_mask_fov > 0.5
+        idx = np.argmax(sfmap_cropped[:, 2] * mask * soft_mask_fov)
+        cx, cy = sfmap_cropped[idx, :2]
+        return mean_safety, soft_mask, (cx, cy, sfmap_cropped[idx, 2])
+
+    else:
+        return mean_safety, soft_mask
 
 
 def get_nn_reachset_param(x0: np.ndarray, tgo: float, model: nn.Module, fov: float):

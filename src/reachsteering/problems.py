@@ -31,7 +31,7 @@ class Pdl:
 
         # Check initial condition
         assert tgo > 0, "Time-to-go must be positive"
-        assert x0[6] > lander.mdry and x0[6] < lander.mwet, "Initial mass must be between dry and wet mass"
+        assert x0[6] >= lander.mdry and x0[6] <= lander.mwet, "Initial mass must be between dry and wet mass"
 
         # Gradient implementation
         self.grad_implemented = grad_implemented
@@ -105,8 +105,6 @@ class PdlCtrl(Pdl):
         throttle = (u_norm - self.rho1_) / (self.rho2_ - self.rho1_)
         gamma = np.arccos(u_[:, 2] / u_norm)
         phi = np.arctan2(u_[:, 1], u_[:, 0])
-
-        print(u.shape, u_.shape, throttle.shape, gamma.shape, phi.shape)
 
         # normalize decision vector
         gamma_ = (gamma - self.gamma_lb) / (self.gamma_ub - self.gamma_lb)

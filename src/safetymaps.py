@@ -64,7 +64,7 @@ class StaticSafetyMap(SafetyMap):
         return self.sfmap
 
 
-class DynamicSafetyMap:
+class DynamicSafetyMap(SafetyMap):
     """Dynamic safety map class."""
 
     def __init__(self, x_range: Tuple, y_range: Tuple, npoints: int, relative_path: str = "."):
@@ -115,7 +115,8 @@ class DynamicSafetyMap:
         Returns:
             np.ndarray: safety map; shape (N, M, 3); each row is [x, y, safety].
         """
-        assert alt >= self.alt0 and alt <= self.alt3
+        eps = 1e-6
+        assert alt >= self.alt0 - eps and alt <= self.alt3 + eps, f"Altitude {alt} out of range [{self.alt0}, {self.alt3}]"
         if alt <= self.alt1:
             # interpolate between alt0 and alt1
             alpha = (alt - self.alt0) / (self.alt1 - self.alt0)
@@ -124,7 +125,7 @@ class DynamicSafetyMap:
             # interpolate between alt1 and alt2
             alpha = (alt - self.alt1) / (self.alt2 - self.alt1)
             sfmap = self.sfmap_alt1 * (1 - alpha) + self.sfmap_alt2 * alpha
-        elif alt <= self.alt3:
+        else:
             # interpolate between alt2 and alt3
             alpha = (alt - self.alt2) / (self.alt3 - self.alt2)
             sfmap = self.sfmap_alt2 * (1 - alpha) + self.sfmap_alt3 * alpha

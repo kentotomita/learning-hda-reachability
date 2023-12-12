@@ -4,11 +4,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 plt.rcParams["font.family"] = "Times New Roman"
+plt.rcParams["font.size"] = 18
 
 
 def plot_3sides(
-    t: np.ndarray, X: np.ndarray, U: np.ndarray, gsa: float = None, uskip: int = 1,
-    fig=None, axs=None
+    t: np.ndarray, X: np.ndarray, U: np.ndarray = None, gsa: float = None, uskip: int = 1,
+    fig=None, axs=None, linetype='k-'
 ):
     """Plot trajectory from three sides
 
@@ -22,66 +23,73 @@ def plot_3sides(
     # Unpack state vector
     x, y, z, vx, vy, vz, m = X.T
 
-    # Unpack control vector
-    ux, uy, uz = U.T
-
     # Plot state vector
     if fig is None or axs is None:
         fig, axs = plt.subplots(2, 2, figsize=(12, 8))
-    axs[0, 0].plot(x, y, c="k")
+    axs[0, 0].plot(x, y, linetype)
     axs[0, 0].grid(True)
     axs[0, 0].set_ylabel("Position y (m)")
-    axs[0, 0].set_xlabel("Position x (m)")
-    axs[1, 0].plot(x, z, c="k")
+    #axs[0, 0].set_xlabel("Position x (m)")
+    # remove x ticks for top left plot
+    #axs[0, 0].set_xticks([])
+
+    axs[0, 1].axis("off")
+    axs[1, 0].plot(x, z, linetype)
     axs[1, 0].grid(True)
     axs[1, 0].set_xlabel("Position x (m)")
     axs[1, 0].set_ylabel("Position z (m)")
-    axs[1, 1].plot(y, z, c="k")
+    axs[1, 1].plot(y, z, linetype)
     axs[1, 1].grid(True)
     axs[1, 1].set_xlabel("Position y (m)")
-    axs[1, 1].set_ylabel("Position z (m)")
+    #axs[1, 1].set_ylabel("Position z (m)")
+    # remove y ticks for right plots
+    #axs[1, 1].set_yticks([])
 
     # Plot control vector on the trajectory plot
-    aw = 1e-1  # arrow width
-    ahw = 1e-1  # arrow head width
-    ahl = 1e-1  # arrow head length
-    aa = 0.8  # arrow alpha
-    scale = 1e-2
-    for i in range(len(t)):
-        if i % uskip == 0:
-            axs[0, 0].arrow(
-                x[i],
-                y[i],
-                ux[i] * scale,
-                uy[i] * scale,
-                color="r",
-                width=aw,
-                alpha=aa,
-                head_width=ahw,
-                head_length=ahl,
-            )
-            axs[1, 0].arrow(
-                x[i],
-                z[i],
-                ux[i] * scale,
-                uz[i] * scale,
-                color="r",
-                width=aw,
-                alpha=aa,
-                head_width=ahw,
-                head_length=ahl,
-            )
-            axs[1, 1].arrow(
-                y[i],
-                z[i],
-                uy[i] * scale,
-                uz[i] * scale,
-                color="r",
-                width=aw,
-                alpha=aa,
-                head_width=ahw,
-                head_length=ahl,
-            )
+    
+    # Unpack control vector
+    if U is not None:
+        ux, uy, uz = U.T
+        aw = 1e-1  # arrow width
+        ahw = 1e-1  # arrow head width
+        ahl = 1e-1  # arrow head length
+        aa = 0.8  # arrow alpha
+        scale = 1e-2
+        for i in range(len(t)):
+            if i % uskip == 0:
+                axs[0, 0].arrow(
+                    x[i],
+                    y[i],
+                    ux[i] * scale,
+                    uy[i] * scale,
+                    color="r",
+                    width=aw,
+                    alpha=aa,
+                    head_width=ahw,
+                    head_length=ahl,
+                )
+                axs[1, 0].arrow(
+                    x[i],
+                    z[i],
+                    ux[i] * scale,
+                    uz[i] * scale,
+                    color="r",
+                    width=aw,
+                    alpha=aa,
+                    head_width=ahw,
+                    head_length=ahl,
+                )
+                axs[1, 1].arrow(
+                    y[i],
+                    z[i],
+                    uy[i] * scale,
+                    uz[i] * scale,
+                    color="r",
+                    width=aw,
+                    alpha=aa,
+                    head_width=ahw,
+                    head_length=ahl,
+                )
 
     # Plot glide slope angle constraint
     if gsa is not None:

@@ -241,6 +241,7 @@ class LCvxMinFuel(LCvxProblem):
         lander: Lander,
         N: int,
         fixed_target: bool = False,
+        close_approach: bool = False,
         parameterize_tf: bool = False,
         parameterize_x0: bool = False,
     ):
@@ -257,6 +258,7 @@ class LCvxMinFuel(LCvxProblem):
             lander, N, parameterize_tf=parameterize_tf, parameterize_x0=parameterize_x0
         )
         self.fixed_target = fixed_target
+        self.close_approach = close_approach
 
     def problem(self, x0: np.ndarray = None, tf: np.ndarray = None) -> cp.Problem:
         """Define the optimization problem.
@@ -285,7 +287,10 @@ class LCvxMinFuel(LCvxProblem):
         cstr += self._boundary_cstr(vars=(r, v, z, u, sigma), x0=x0)
 
         # Problem objective
-        obj = cp.Minimize(cp.sum(sigma) * dt)
+        if self.close_approach:
+            obj = cp.Minimize(cp.sum(sigma) * dt + cp.norm(r[:, -1], p=2))
+        else:
+            obj = cp.Minimize(cp.sum(sigma) * dt)
 
         return cp.Problem(obj, cstr)
 
