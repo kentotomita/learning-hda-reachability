@@ -44,7 +44,7 @@ class HdaGuidance:
 
         return np.array(t), np.array(X), np.array(U)
 
-    def solve_hda(self, x0: np.ndarray, tof: float, T: float, dt: float):
+    def solve_hda(self, x0: np.ndarray, tof: float, T: float, dt: float, verbosity: int=1):
         """Solve HDA guidance.
 
         Args:
@@ -64,8 +64,9 @@ class HdaGuidance:
         t0 = 0.0
         tgo = tof
         while tgo > T:
-            print(f"x0: {x0}, tgo: {tgo}")
-            t, X, U, sfmap_next, x0_next = self.solve_single_leg(x0, t0, tgo, T, dt)
+            if verbosity > 0:
+                print(f"x0: {x0}, tgo: {tgo}")
+            t, X, U, sfmap_next, x0_next = self.solve_single_leg(x0, t0, tgo, T, dt, verbosity)
             self.t_list.append(t)
             self.X_list.append(X)
             self.U_list.append(U)
@@ -74,7 +75,7 @@ class HdaGuidance:
             tgo -= T
             t0 += T
     
-    def solve_single_leg(self, x0: np.ndarray, t0: float, tgo: float, T: float, dt: float):
+    def solve_single_leg(self, x0: np.ndarray, t0: float, tgo: float, T: float, dt: float, verbosity):
         """Solve HDA guidance for a single leg.
 
         Args:
@@ -113,7 +114,7 @@ class HdaGreedy(HdaGuidance):
         self.mean_safety_list = []
         self.reachmask_list = []
 
-    def solve_single_leg(self, x0: np.ndarray, t0: float, tgo: float, T: float, dt: float):
+    def solve_single_leg(self, x0: np.ndarray, t0: float, tgo: float, T: float, dt: float, verbosity: int=1):
         start = time.time()
 
         # get safety map
@@ -174,7 +175,8 @@ class HdaGreedy(HdaGuidance):
         sfmap_next = self.sfmap_model.get_sfmap(x0_next[2])
 
         end = time.time()
-        print(f"Greedy HDA optimized single leg: {end - start} sec")
+        if verbosity > 0:
+            print(f"Greedy HDA optimized single leg: {end - start} sec")
 
         return t, X, U, sfmap_next, x0_next
 
@@ -198,14 +200,14 @@ class HdaReachSteering(HdaGreedy):
         self.ctol = ctol
         self.verbosity = verbosity
 
-    def solve_single_leg(self, x0: np.ndarray, t0: float, tgo: float, T: float, dt: float):
+    def solve_single_leg(self, x0: np.ndarray, t0: float, tgo: float, T: float, dt: float, verbosity: int=1):
         start = time.time()
 
         # get safety map
         sfmap = self.sfmap_list[-1]
 
         # get initial guess from greedy HDA
-        t, _, U, _, _ = super().solve_single_leg(x0, t0, tgo, T, dt)
+        t, _, U, _, _ = super().solve_single_leg(x0, t0, tgo, T, dt, verbosity)
         
         # solve reach-steering problem
         N = int(tgo / dt)
@@ -237,6 +239,7 @@ class HdaReachSteering(HdaGreedy):
         self.reachmask_list[-1] = reach_mask_optimized
 
         end = time.time()
-        print(f"Reach-steering HDA optimized single leg: {end - start} sec")
+        if verbosity > 0:
+            print(f"Reach-steering HDA optimized single leg: {end - start} sec")
 
         return t, X, U, sfmap_next, x0_next
