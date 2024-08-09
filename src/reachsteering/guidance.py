@@ -216,13 +216,13 @@ class HdaReachSteering(HdaGreedy):
         prob = pg.problem(udp)
         x0_udp = udp.construct_x(U)
 
-        uda = snopt7(screen_output=False, library="C:/Users/ktomita3/libsnopt7/snopt7.dll", minor_version=7)
+        uda = snopt7(screen_output=True, library="C:/Users/ktomita3/libsnopt7/snopt7.dll", minor_version=7)
         uda.set_integer_option("Major Iteration Limit", self.itr_max)
         uda.set_numeric_option("Major optimality tolerance", self.ftol)
         uda.set_numeric_option("Major feasibility tolerance", self.ctol)
         uda.set_numeric_option('Minor feasibility tolerance', self.ctol)
         algo = pg.algorithm(uda)
-        algo.set_verbosity(self.verbosity)
+        #algo.set_verbosity(self.verbosity)
 
         pop = pg.population(prob, 0)
         pop.push_back(x0_udp)

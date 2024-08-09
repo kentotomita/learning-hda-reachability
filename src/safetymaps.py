@@ -1,9 +1,10 @@
-from typing import Tuple
+from typing import Tuple, List
 import numpy as np
 import os
 import matplotlib.pyplot as plt
 from PIL import Image
 from scipy.ndimage.filters import gaussian_filter
+import random
 
 
 class SafetyMap:
@@ -62,7 +63,104 @@ class StaticSafetyMap(SafetyMap):
             np.ndarray: safety map; shape (N, M, 3); each row is [x, y, safety].
         """
         return self.sfmap
+    
 
+class StaticNoisedSafetyMap(SafetyMap):
+    """Static safety map class."""
+    
+    def __init__(self, x_range: Tuple, y_range: Tuple, npoints: int, sfmap: np.ndarray=None):
+        """Initialize static safety map.
+
+        Args:
+            npoints (int): number of points in x and y directions.
+        """
+        super().__init__(x_range, y_range, npoints)
+
+        if sfmap is None:
+            sfmap, _ = make_simple_sfmap(x_range, y_range, npoints)
+
+        self.sfmap = sfmap
+
+    def get_sfmap(self, alt: float) -> np.ndarray:
+        """Get safety map at the specified altitude.
+
+        Args:
+            alt (float): altitude.
+
+        Returns:
+            np.ndarray: safety map; shape (N, M, 3); each row is [x, y, safety].
+        """
+        n_noise = max(1, min(10, int(self.sfmap.shape[0] * 0.001)))
+        random_indices = np.random.choice(self.sfmap.shape[0], n_noise, replace=False)
+        self.sfmap[random_indices, 2] = 1.0
+        
+        return self.sfmap
+    
+
+class DesignedSafetyMap(SafetyMap):
+    """Designed safety map class."""
+    
+    def __init__(self, x_range: Tuple, y_range: Tuple, npoints: int, n_hazards: List[int], hazard_sizes: List[int]):
+        """Initialize designed safety map.
+
+        Args:
+            npoints (int): number of points in x and y directions.
+        """
+        super().__init__(x_range, y_range, npoints)
+
+        xmin, xmax = x_range
+        ymin, ymax = y_range
+        x = np.linspace(xmin, xmax, npoints)
+        y = np.linspace(ymin, ymax, npoints)
+        self.X, self.Y = np.meshgrid(x, y)
+
+        sfmap = np.zeros((npoints, npoints, 3))
+        sfmap[:, :, 0] = self.X
+        sfmap[:, :, 1] = self.Y
+        
+        assert len(n_hazards) == len(hazard_sizes), "Number of hazards and sizes do not match."
+        n_level = len(n_hazards)
+        self.alt_levels = np.linspace(0, 1500, n_level)
+        self.hazard_maps = []
+        for i in range(n_level):
+            self.hazard_maps.append(generate_binary_disk_array((npoints, npoints), n_hazards[i], hazard_sizes[i]))
+
+        self.safety_maps = []
+        for i in range(n_level):
+            #safety = 0.5 + (n_level - i) / n_level * 0.5
+            safety = 1.0
+            for j in range(n_level - i):
+                safety *= (1 - self.hazard_maps[j])
+            self.safety_maps.append(safety)
+
+
+    def get_sfmap(self, alt: float) -> np.ndarray:
+        """Get safety map at the specified altitude.
+
+        Args:
+            alt (float): altitude.
+
+        Returns:
+            np.ndarray: safety map; shape (N, M, 3); each row is [x, y, safety].
+        """
+        if alt <= self.alt_levels[0]:
+            safety = self.safety_maps[0]
+        elif alt >= self.alt_levels[-1]:
+            safety = self.safety_maps[-1]
+        else:
+            for i in range(1, len(self.alt_levels)):
+                if alt < self.alt_levels[i]:
+                    c = (alt - self.alt_levels[i-1]) / (self.alt_levels[i] - self.alt_levels[i-1])
+                    safety = self.safety_maps[i-1] * (1 - c) + self.safety_maps[i] * c
+                    break
+
+        sfmap = np.zeros((self.npoints, self.npoints, 3))
+        sfmap[:, :, 0] = self.X
+        sfmap[:, :, 1] = self.Y
+        sfmap[:, :, 2] = safety
+
+        return sfmap.reshape(-1, 3)
+    
 
 class DynamicSafetyMap(SafetyMap):
     """Dynamic safety map class."""
@@ -219,3 +317,54 @@ def visualize_sfmap(sfmap: np.ndarray):
 
     plt.tight_layout()
     plt.show()
+
+
+def generate_binary_disk_array(array_size, num_disks, disk_diameter):
+    """
+    Generates a 2D binary array with specified number of binary disks.
+
+    Parameters:
+    - array_size: Tuple of (height, width) of the binary array.
+    - num_disks: Number of binary disks to be placed in the array.
+    - disk_diameter: Diameter of each disk.
+
+    Returns:
+    - A 2D binary numpy array.
+    """
+    height, width = array_size
+    array = np.zeros((height, width), dtype=int)
+    
+    radius = disk_diameter // 2
+
+    def is_valid_position(x, y):
+        """Check if the disk can be placed at the position (x, y) without overlapping."""
+        for i in range(max(0, x - radius), min(height, x + radius + 1)):
+            for j in range(max(0, y - radius), min(width, y + radius + 1)):
+                if array[i, j] == 1 and (i - x)**2 + (j - y)**2 <= radius**2:
+                    return False
+        return True
+
+    def place_disk(x, y):
+        """Place a disk centered at (x, y)."""
+        for i in range(max(0, x - radius), min(height, x + radius + 1)):
+            for j in range(max(0, y - radius), min(width, y + radius + 1)):
+                if (i - x)**2 + (j - y)**2 <= radius**2:
+                    array[i, j] = 1
+
+    placed_disks = 0
+    attempts = 0
+    max_attempts = 10000
+
+    while placed_disks < num_disks and attempts < max_attempts:
+        x = random.randint(radius, height - radius - 1)
+        y = random.randint(radius, width - radius - 1)
+        
+        if True: #is_valid_position(x, y):
+            place_disk(x, y)
+            placed_disks += 1
+        attempts += 1
+
+    if attempts >= max_attempts:
+        print("Warning: Max attempts reached. Not all disks may have been placed.")
+
+    return array
