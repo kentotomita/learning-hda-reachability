@@ -389,7 +389,7 @@ class MinFuelStateCtrl(PdlStateCtrl):
 class ReachSteeringCtrl(MinFuelCtrl):
     """Reachability steering problem where control sequence is decision variable"""
     def __init__(self, lander: Lander, N: int, x0: np.ndarray, tgo: float,
-                 sfmap: torch.Tensor, nn_reach: Module, kmax: int, border_sharpness: float,
+                 sfmap: torch.Tensor, nn_reach: Module, kmax: int, border_sharpness: float, alpha: float,
                  grad_implemented: bool=False, normalize: bool=True):
         """Initialize the problem
         
@@ -409,6 +409,7 @@ class ReachSteeringCtrl(MinFuelCtrl):
         self.sfmap = sfmap
         self.nn_reach = nn_reach
         self.border_sharpness = border_sharpness
+        self.alpha = alpha
 
     def fitness(self, x):
         """Compute fitness for given decision vector x
@@ -435,15 +436,17 @@ class ReachSteeringCtrl(MinFuelCtrl):
         v = v_ * self.LU / self.TU
         m = m_ * self.MU
         nn_input = np.hstack((r[self.kmax, :].flatten(), v[self.kmax, :].flatten(), m[self.kmax]))
-        safety, _ = ic2mean_safety_npy(
+        safety, _, safest_point = ic2mean_safety_npy(
             lander=self.lander,
             x0=nn_input,
             tgo=self.tgo-self.dt * self.kmax,
             model=self.nn_reach,
             sfmap=self.sfmap,
             border_sharpness=self.border_sharpness,
+            return_safest_point=True
             )
-        return [-safety] + list(cstr_eq) + cstr_ineq_terminal + list(cstr_ineq)
+        obj = self.alpha * safest_point[2] + (1 - self.alpha) * safety
+        return [-obj] + list(cstr_eq) + cstr_ineq_terminal + list(cstr_ineq)
 
 
 @jit(nopython=True)

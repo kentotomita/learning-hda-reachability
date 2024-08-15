@@ -20,7 +20,7 @@ def ic2mean_safety_npy(lander: Lander, x0: np.ndarray, tgo: float, model: nn.Mod
         sfmap (np.ndarray): safety map
         border_sharpness (float, optional): sharpness of the soft boundary. Defaults to 0.1.
     """
-    assert lander.mdry <= x0[6] <= lander.mwet, f"Invalid mass: {x0[6]}"
+    #assert lander.mdry <= x0[6] <= lander.mwet, f"Invalid mass: {x0[6]}"
 
     # compute reachset parameters
     xmin, xmax, ymax, x_ymax, rotation_angle, center = get_nn_reachset_param(x0, tgo, model, lander.fov)
@@ -44,8 +44,8 @@ def ic2mean_safety_npy(lander: Lander, x0: np.ndarray, tgo: float, model: nn.Mod
 
     if return_safest_point:
         # get xy coordinate that maximizes sfmap_crop * soft_mask_fov
-        mask = soft_mask_fov > 0.5
-        idx = np.argmax(sfmap_cropped[:, 2] * mask * soft_mask_fov)
+        #mask = soft_mask_fov > 0.5
+        idx = np.argmax(sfmap_cropped[:, 2] * soft_mask_fov)
         cx, cy = sfmap_cropped[idx, :2]
         return mean_safety, soft_mask, (cx, cy, sfmap_cropped[idx, 2])
 
@@ -96,7 +96,7 @@ def crop_sfmap(sfmap, xrange, yrange):
     return sfmap_cropped, mask
 
 
-@jit(nopython=True)
+#@jit(nopython=True)
 def _calc_mean_safety_npy(a1, a2, b, x_ymax, rotation_angle, center, sfmap, alpha, fov_radius):
     """Compute mean safety of the initial condition (x0, tgo) based on the soft landing reachable set."""
 

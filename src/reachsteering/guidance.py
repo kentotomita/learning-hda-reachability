@@ -7,7 +7,7 @@ import time
 import sys
 sys.path.append('../')
 from .problems import ReachSteeringCtrl
-from .objectives import ic2mean_safety_npy
+from .objectives import ic2mean_safety_npy, get_nn_reachset_param, rot2d
 from ..lcvx import LCvxMinFuel, get_vars
 from ..landers import Lander
 from ..safetymaps import SafetyMap
@@ -114,7 +114,8 @@ class HdaGreedy(HdaGuidance):
         self.mean_safety_list = []
         self.reachmask_list = []
 
-    def solve_single_leg(self, x0: np.ndarray, t0: float, tgo: float, T: float, dt: float, verbosity: int=1):
+    def solve_single_leg(self, x0: np.ndarray, t0: float, tgo: float, T: float, dt: float, verbosity: int=1, 
+                         cx=None, cy=None):
         start = time.time()
 
         # get safety map
@@ -185,7 +186,8 @@ class HdaReachSteering(HdaGreedy):
     """Reach-steering HDA guidance."""
 
     def __init__(self, lander: Lander, sfmap_model: SafetyMap, nn_reach: Module, border_sharpness: float = 10.0,
-                 itr_max: int = 1000, ftol: float = 1e-8, ctol: float = 1e-6, verbosity: int = 100):
+                 alpha: float = 0.5, init_guess_safest=True,
+                 itr_max: int = 1000, ftol: float = 1e-8, ctol: float = 1e-6, verbosity: int = 1):
         """Initialize reach-steering HDA guidance.
 
         Args:
@@ -199,6 +201,92 @@ class HdaReachSteering(HdaGreedy):
         self.ftol = ftol
         self.ctol = ctol
         self.verbosity = verbosity
+        self.alpha = alpha
+        self.init_guess_safest = init_guess_safest
+
+    def find_initial_guess(self, x0: np.ndarray, t0: float, tgo: float, dt: float, n_sol=10, verbosity=1):
+
+        start = time.time()
+
+        if self.init_guess_safest:
+            sfmap = self.sfmap_list[-1]
+            _, _, safest_point = ic2mean_safety_npy(self.lander, x0, tgo, self.nn_reach, sfmap, self.border_sharpness, return_safest_point=True)
+            cx = safest_point[0]
+            cy = safest_point[1]
+            target_list = [np.array([cx, cy])]
+
+        else:
+
+            # get reachability set 
+            # compute reachset parameters
+            xmin, xmax, ymax, x_ymax, rotation_angle, center = get_nn_reachset_param(x0, tgo, self.nn_reach, self.lander.fov)
+            a1 = x_ymax - xmin
+            a2 = xmax - x_ymax
+            b = ymax
+
+            def inside_reach(x, y):
+                return (x < x_ymax and (x - x_ymax)**2 / a1**2 + y**2 / b**2 < 1) or (x >= x_ymax and (x - x_ymax)**2 / a2**2 + y**2 / b**2 < 1) 
+
+            target_list = []
+            n_sample = 0
+            while n_sample < n_sol:
+                x = np.random.uniform(xmin, xmax)
+                y = np.random.uniform(-ymax, ymax)
+                if inside_reach(x, y):
+                    n_sample += 1
+
+                    r_target = np.array([x, y]) @ rot2d(rotation_angle) + center
+                    target_list.append(r_target)
+        
+        # --------------------
+        # solve minimum fuel trajectory targeting (cx, cy)
+        # --------------------
+        def solve_min_fuel(target):
+            cx, cy = target
+            # solve minimum fuel trajectory
+            N = int(tgo / dt)
+            x0_log_mass = np.copy(x0)
+            x0_log_mass[0] -= cx  # shift to the origin
+            x0_log_mass[1] -= cy  #
+            x0_log_mass[6] = np.log(x0[6])
+            lcvx = LCvxMinFuel(
+                lander=self.lander,
+                N=N,
+                parameterize_x0=False,
+                parameterize_tf=False,
+                fixed_target=False,
+                close_approach=True
+            )
+            prob = lcvx.problem(x0=x0_log_mass, tf=tgo)
+            prob.solve(solver=cp.ECOS, verbose=False)
+
+            if prob.status == cp.OPTIMAL:
+                sol = get_vars(prob, ["X", "U"])
+                X_sol = sol["X"]
+                U_sol = sol["U"]
+                r, v, z, u, _ = lcvx.recover_variables(X_sol, U_sol)
+                m = np.exp(z)
+                X = np.hstack((r.T, v.T, m.reshape(-1, 1)))
+                X[:, 0] += cx
+                X[:, 1] += cy
+                U = u.T * m[:-1].reshape(-1, 1)
+                t = np.linspace(t0, t0 + tgo, N + 1)
+                return t, U, target
+            
+            else:
+                return None
+            
+        data_list = []
+        for target in target_list:
+            data = solve_min_fuel(target)
+            if data is not None:
+                data_list.append(data)
+
+        end = time.time()
+        if verbosity > 0:
+            print(f"Initial guess: {end - start} sec for {len(data_list)} solutions")
+
+        return data_list
 
     def solve_single_leg(self, x0: np.ndarray, t0: float, tgo: float, T: float, dt: float, verbosity: int=1):
         start = time.time()
@@ -206,17 +294,21 @@ class HdaReachSteering(HdaGreedy):
         # get safety map
         sfmap = self.sfmap_list[-1]
 
+        # get reachability set 
+        mean_safety, soft_mask = ic2mean_safety_npy(self.lander, x0, tgo, self.nn_reach, sfmap, self.border_sharpness, return_safest_point=False)
+        self.mean_safety_list.append(mean_safety)
+
         # get initial guess from greedy HDA
-        t, _, U, _, _ = super().solve_single_leg(x0, t0, tgo, T, dt, verbosity)
+        initial_guess = self.find_initial_guess(x0, t0, tgo, dt, n_sol=5, verbosity=verbosity)
         
         # solve reach-steering problem
         N = int(tgo / dt)
         kmax = int(T / dt)
-        udp = ReachSteeringCtrl(self.lander, N, x0, tgo, sfmap, self.nn_reach, kmax, self.border_sharpness)
+        udp = ReachSteeringCtrl(self.lander, N, x0, tgo, sfmap, self.nn_reach, kmax, self.border_sharpness, self.alpha)
         prob = pg.problem(udp)
-        x0_udp = udp.construct_x(U)
+        #x0_udp = udp.construct_x(U)
 
-        uda = snopt7(screen_output=True, library="C:/Users/ktomita3/libsnopt7/snopt7.dll", minor_version=7)
+        uda = snopt7(screen_output=True, library="C:/Users/ktomita3/libsnopt7_old/snopt7.dll", minor_version=7)
         uda.set_integer_option("Major Iteration Limit", self.itr_max)
         uda.set_numeric_option("Major optimality tolerance", self.ftol)
         uda.set_numeric_option("Major feasibility tolerance", self.ctol)
@@ -225,18 +317,33 @@ class HdaReachSteering(HdaGreedy):
         #algo.set_verbosity(self.verbosity)
 
         pop = pg.population(prob, 0)
-        pop.push_back(x0_udp)
+        #pop.push_back(x0_udp)
+        for data in initial_guess:
+            _, U, _ = data
+            x0_udp = udp.construct_x(U)
+            pop.push_back(x0_udp)
 
         result = algo.evolve(pop)
-        r, v, m, U = udp.construct_trajectory(result.champion_x)
-        X = np.hstack((r, v, m.reshape(-1, 1)))
+        try:
+            r, v, m, U = udp.construct_trajectory(result.champion_x)
+            X = np.hstack((r, v, m.reshape(-1, 1)))
+
+        except:
+            print("Optimization failed")
+            # use solution from previous leg
+            print("Use solution from previous leg")
+            X = np.copy(self.X_list[-1])[kmax:, :]
+            U = np.copy(self.U_list[-1])[kmax:, :]
+
+        t = np.linspace(t0, t0 + tgo, N + 1)
+        x0_next = np.copy(X[kmax, :])
         
-        x0_next = np.hstack((r[kmax, :].flatten(), v[kmax, :].flatten(), m[kmax]))
+        #x0_next = np.hstack((r[kmax, :].flatten(), v[kmax, :].flatten(), m[kmax]))
         sfmap_next = self.sfmap_model.get_sfmap(x0_next[2])
 
         mean_safety_pred, reach_mask_optimized = ic2mean_safety_npy(self.lander, x0_next, tgo-T, self.nn_reach, sfmap_next, self.border_sharpness)
         self.mean_safety_pred_list.append(mean_safety_pred)
-        self.reachmask_list[-1] = reach_mask_optimized
+        self.reachmask_list.append(reach_mask_optimized)
 
         end = time.time()
         if verbosity > 0:

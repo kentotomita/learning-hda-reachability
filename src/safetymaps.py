@@ -282,12 +282,27 @@ def make_simple_sfmap(x_range, y_range, n_points):
     sfmap = np.zeros((n_points, n_points, 3))
     sfmap[:, :, 0] = X
     sfmap[:, :, 1] = Y
-    sfmap[:, :, 2] = X + Y 
+    #sfmap[:, :, 2] = 1 - np.exp(-np.abs(2 * (2 * X + Y) / (xmax + ymax)))
+    x_best = 0.8 * xmax + 0.2 * xmin
+    y_best = 0.6 * ymax + 0.4 * ymin
+    mu = np.array([x_best, y_best])
+    cov = np.array([[5, 1], [1, 3]]) * max(xmax - xmin, ymax - ymin) * 5
+    inv_cov = np.linalg.inv(cov)
+    sfmap[:, :, 2] = np.exp(-np.sum((np.dstack((X, Y)) - mu) @ inv_cov * (np.dstack((X, Y)) - mu), axis=2))
     sfmap[:, :, 2] = (sfmap[:, :, 2] - np.min(sfmap[:, :, 2])) / (np.max(sfmap[:, :, 2]) - np.min(sfmap[:, :, 2]))
     sfmap[:, :, 2][X > 500] = 0.0
     sfmap[:, :, 2][Y > 500] = 0.0
     sfmap[:, :, 2][X < -500] = 0.0
     sfmap[:, :, 2][Y < -500] = 0.0
+
+    x_safe, y_safe = -50.0, -20.0
+    sfmap[:, :, 2][(X > x_safe - 5) * (Y > y_safe - 5) * (X < x_safe + 5) * (Y < y_safe + 5)] = 0.9
+
+    plt.figure()
+    plt.pcolormesh(X, Y, sfmap[:, :, 2], shading='auto', cmap='gray', vmin=0, vmax=1)
+    plt.colorbar()
+    plt.show()
+
     sfmap = sfmap.reshape(-1, 3)
 
     return sfmap, (n_points, n_points)
@@ -368,3 +383,91 @@ def generate_binary_disk_array(array_size, num_disks, disk_diameter):
         print("Warning: Max attempts reached. Not all disks may have been placed.")
 
     return array
+
+
+class DynamicSafetyMap2(SafetyMap):
+    """Dynamic safety map class."""
+
+    def __init__(self, x_range: Tuple, y_range: Tuple, npoints: int, relative_path: str = "."):
+        """Initialize dynamic safety map.
+
+        Args:
+            npoints (int): number of points in x and y directions.
+        """
+        super().__init__(x_range, y_range, npoints)
+
+        xmin, xmax = x_range
+        ymin, ymax = y_range
+        x = np.linspace(xmin, xmax, npoints)
+        y = np.linspace(ymin, ymax, npoints)
+        self.X, self.Y = np.meshgrid(x, y)
+
+        self.sfmap_dir = os.path.join(relative_path, "saved/sfmap_shd_based")
+        #self.alt0_fname = "sfmap_data_truth.npz"
+        self.alt0_fname = "sfmap_data_0.npz"
+        self.alt1_fname = "sfmap_data_1.npz"
+        self.alt2_fname = "sfmap_data_2.npz"
+        self.alt3_fname = "sfmap_data_3.npz"
+
+        self.alt0 = 0.0
+        self.alt1 = 500.0
+        self.alt2 = 750.0
+        self.alt3 = 1500.0
+
+        self.sfmap_alt0 = np.load(os.path.join(self.sfmap_dir, self.alt0_fname))['site_safe']
+        self.sfmap_alt1 = np.load(os.path.join(self.sfmap_dir, self.alt1_fname))['site_safe']
+        self.sfmap_alt2 = np.load(os.path.join(self.sfmap_dir, self.alt2_fname))['site_safe']
+        self.sfmap_alt3 = np.load(os.path.join(self.sfmap_dir, self.alt3_fname))['site_safe']
+
+        # resize the safety map
+        self.sfmap_alt0 = self.resize_sfmap(self.sfmap_alt0, self.npoints, self.npoints)
+        self.sfmap_alt1 = self.resize_sfmap(self.sfmap_alt1, self.npoints, self.npoints)
+        self.sfmap_alt2 = self.resize_sfmap(self.sfmap_alt2, self.npoints, self.npoints)
+        self.sfmap_alt3 = self.resize_sfmap(self.sfmap_alt3, self.npoints, self.npoints)
+
+    def resize_sfmap(self, sfmap: np.ndarray, nr: int, nc: int) -> np.ndarray:
+        # Convert the array to an image
+        original_image = Image.fromarray(np.uint8(sfmap * 255))
+        # Resize the image to (1024, 1024)
+        resized_image = original_image.resize((nr, nc), Image.BILINEAR)
+        # Convert the resized image back to an array
+        resized_array = np.asarray(resized_image) / 255.0
+        return resized_array
+
+    def get_sfmap(self, alt: float) -> np.ndarray:
+        """Get safety map at the specified altitude.
+
+        Args:
+            alt (float): altitude.
+
+        Returns:
+            np.ndarray: safety map; shape (N, M, 3); each row is [x, y, safety].
+        """
+        eps = 1e-6
+        assert alt >= self.alt0 - eps and alt <= self.alt3 + eps, f"Altitude {alt} out of range [{self.alt0}, {self.alt3}]"
+        if alt <= self.alt1:
+            # interpolate between alt0 and alt1
+            alpha = (alt - self.alt0) / (self.alt1 - self.alt0)
+            sfmap = self.sfmap_alt0 * (1 - alpha) + self.sfmap_alt1 * alpha
+        elif alt < self.alt2:
+            # interpolate between alt1 and alt2
+            alpha = (alt - self.alt1) / (self.alt2 - self.alt1)
+            sfmap = self.sfmap_alt1 * (1 - alpha) + self.sfmap_alt2 * alpha
+        else:
+            # interpolate between alt2 and alt3
+            alpha = (alt - self.alt2) / (self.alt3 - self.alt2)
+            sfmap = self.sfmap_alt2 * (1 - alpha) + self.sfmap_alt3 * alpha
+
+        # resize the safety map
+        sfmap = self.resize_sfmap(sfmap, self.npoints, self.npoints)
+
+        # smooth the safety map using scipy.ndimage.filters.gaussian_filter
+        sfmap = gaussian_filter(sfmap, sigma=1.0)
+
+        # reshape the safety map into (N, 3)
+        sfmap_ = np.zeros((self.npoints, self.npoints, 3))
+        sfmap_[:, :, 0] = self.X
+        sfmap_[:, :, 1] = self.Y
+        sfmap_[:, :, 2] = sfmap
+        sfmap = sfmap_.reshape(-1, 3)
+        return sfmap
