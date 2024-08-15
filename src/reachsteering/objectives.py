@@ -38,6 +38,7 @@ def ic2mean_safety_npy(lander: Lander, x0: np.ndarray, tgo: float, model: nn.Mod
     b = ymax
 
     mean_safety, soft_mask_fov = _calc_mean_safety_npy(a1, a2, b, x_ymax, rotation_angle, center, sfmap_cropped, border_sharpness, fov_radius)
+    sum_safety = mean_safety * np.sum(soft_mask_fov)
 
     soft_mask = np.zeros_like(crop_mask).astype(np.float32)
     soft_mask[crop_mask] = soft_mask_fov
@@ -45,12 +46,21 @@ def ic2mean_safety_npy(lander: Lander, x0: np.ndarray, tgo: float, model: nn.Mod
     if return_safest_point:
         # get xy coordinate that maximizes sfmap_crop * soft_mask_fov
         #mask = soft_mask_fov > 0.5
-        idx = np.argmax(sfmap_cropped[:, 2] * soft_mask_fov)
-        cx, cy = sfmap_cropped[idx, :2]
-        return mean_safety, soft_mask, (cx, cy, sfmap_cropped[idx, 2])
+        try:
+            idx = np.argmax(sfmap_cropped[:, 2] * soft_mask_fov)
+            cx, cy = sfmap_cropped[idx, :2]
+        except ValueError:
+            print("No safe point found.")
+            print(f"sfmap_cropped[:, 2]={sfmap_cropped[:, 2]}")
+            print(f"soft_mask_fov={soft_mask_fov}")
+            print(f"sfmap_cropped.shape={sfmap_cropped.shape}")
+            print(f"soft_mask_fov.shape={soft_mask_fov.shape}")
+            cx, cy = center
+            
+        return sum_safety, soft_mask, (cx, cy, sfmap_cropped[idx, 2])
 
     else:
-        return mean_safety, soft_mask
+        return sum_safety, soft_mask
 
 
 def get_nn_reachset_param(x0: np.ndarray, tgo: float, model: nn.Module, fov: float):

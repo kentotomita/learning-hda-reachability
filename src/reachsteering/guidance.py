@@ -112,6 +112,8 @@ class HdaGreedy(HdaGuidance):
         self.nn_reach = nn_reach
         self.target_list = []
         self.mean_safety_list = []
+        self.sum_safety_list = []
+        self.max_safety_list = []
         self.reachmask_list = []
 
     def solve_single_leg(self, x0: np.ndarray, t0: float, tgo: float, T: float, dt: float, verbosity: int=1, 
@@ -122,7 +124,10 @@ class HdaGreedy(HdaGuidance):
         sfmap = self.sfmap_list[-1]
 
         # get reachability set 
-        mean_safety, soft_mask, safest_point = ic2mean_safety_npy(self.lander, x0, tgo, self.nn_reach, sfmap, self.border_sharpness, return_safest_point=True)
+        sum_safety, soft_mask, safest_point = ic2mean_safety_npy(self.lander, x0, tgo, self.nn_reach, sfmap, self.border_sharpness, return_safest_point=True)
+        mean_safety = sum_safety / np.sum(soft_mask)
+        self.sum_safety_list.append(sum_safety)
+        self.max_safety_list.append(safest_point[2])
         self.mean_safety_list.append(mean_safety)
         self.reachmask_list.append(soft_mask)
         self.target_list.append(safest_point)
@@ -186,7 +191,7 @@ class HdaReachSteering(HdaGreedy):
     """Reach-steering HDA guidance."""
 
     def __init__(self, lander: Lander, sfmap_model: SafetyMap, nn_reach: Module, border_sharpness: float = 10.0,
-                 alpha: float = 0.5, init_guess_safest=True,
+                 alpha: float = 0.5, init_guess_safest=True, n_sol=10,
                  itr_max: int = 1000, ftol: float = 1e-8, ctol: float = 1e-6, verbosity: int = 1):
         """Initialize reach-steering HDA guidance.
 
@@ -197,6 +202,8 @@ class HdaReachSteering(HdaGreedy):
         """
         super().__init__(lander, sfmap_model, nn_reach, border_sharpness)
         self.mean_safety_pred_list = []
+        self.reachmask_next_list = []
+        self.n_sol = n_sol
         self.itr_max = itr_max
         self.ftol = ftol
         self.ctol = ctol
@@ -295,11 +302,14 @@ class HdaReachSteering(HdaGreedy):
         sfmap = self.sfmap_list[-1]
 
         # get reachability set 
-        mean_safety, soft_mask = ic2mean_safety_npy(self.lander, x0, tgo, self.nn_reach, sfmap, self.border_sharpness, return_safest_point=False)
-        self.mean_safety_list.append(mean_safety)
+        sum_safety, soft_mask, safest_point = ic2mean_safety_npy(self.lander, x0, tgo, self.nn_reach, sfmap, self.border_sharpness, return_safest_point=True)
+        self.mean_safety_list.append(sum_safety / np.sum(soft_mask))
+        self.sum_safety_list.append(sum_safety)
+        self.max_safety_list.append(safest_point[2])
+        self.reachmask_list.append(soft_mask)
 
-        # get initial guess from greedy HDA
-        initial_guess = self.find_initial_guess(x0, t0, tgo, dt, n_sol=5, verbosity=verbosity)
+
+            
         
         # solve reach-steering problem
         N = int(tgo / dt)
@@ -318,9 +328,16 @@ class HdaReachSteering(HdaGreedy):
 
         pop = pg.population(prob, 0)
         #pop.push_back(x0_udp)
-        for data in initial_guess:
-            _, U, _ = data
-            x0_udp = udp.construct_x(U)
+        
+        # get initial guess from greedy HDA
+        if len(self.t_list) == 0:
+            initial_guess = self.find_initial_guess(x0, t0, tgo, dt, n_sol=self.n_sol, verbosity=verbosity)
+            for data in initial_guess:
+                _, U, _ = data
+                x0_udp = udp.construct_x(U)
+                pop.push_back(x0_udp)
+        else:
+            x0_udp = udp.construct_x(self.U_list[-1][kmax:, :])
             pop.push_back(x0_udp)
 
         result = algo.evolve(pop)
@@ -341,9 +358,9 @@ class HdaReachSteering(HdaGreedy):
         #x0_next = np.hstack((r[kmax, :].flatten(), v[kmax, :].flatten(), m[kmax]))
         sfmap_next = self.sfmap_model.get_sfmap(x0_next[2])
 
-        mean_safety_pred, reach_mask_optimized = ic2mean_safety_npy(self.lander, x0_next, tgo-T, self.nn_reach, sfmap_next, self.border_sharpness)
-        self.mean_safety_pred_list.append(mean_safety_pred)
-        self.reachmask_list.append(reach_mask_optimized)
+        obj_val, reach_mask_optimized = ic2mean_safety_npy(self.lander, x0_next, tgo-T, self.nn_reach, sfmap_next, self.border_sharpness)
+        self.mean_safety_pred_list.append(obj_val)
+        self.reachmask_next_list.append(reach_mask_optimized)
 
         end = time.time()
         if verbosity > 0:

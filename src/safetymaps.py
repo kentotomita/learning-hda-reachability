@@ -400,11 +400,12 @@ class DynamicSafetyMap2(SafetyMap):
         ymin, ymax = y_range
         x = np.linspace(xmin, xmax, npoints)
         y = np.linspace(ymin, ymax, npoints)
-        self.X, self.Y = np.meshgrid(x, y)
+        #self.X, self.Y = np.meshgrid(x, y)
+        self.Y, self.X = np.meshgrid(y, x)
 
         self.sfmap_dir = os.path.join(relative_path, "saved/sfmap_shd_based")
-        #self.alt0_fname = "sfmap_data_truth.npz"
-        self.alt0_fname = "sfmap_data_0.npz"
+        self.alt0_fname = "sfmap_data_truth.npz"
+        #self.alt0_fname = "sfmap_data_0.npz"
         self.alt1_fname = "sfmap_data_1.npz"
         self.alt2_fname = "sfmap_data_2.npz"
         self.alt3_fname = "sfmap_data_3.npz"
